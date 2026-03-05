@@ -20,10 +20,10 @@
 
 ## Reference guides
 
-- [codebase-patterns](../../.agents/guides/codebase-patterns.md) — pipeline architecture, parser contracts, performance patterns
+- [codebase-patterns](../../.agents/guides/codebase-patterns.md): pipeline architecture, parser contracts, performance patterns
 
 ## Documentation
 
-- [docs/architecture.md](../../docs/architecture.md) — full pipeline architecture and streaming model
-- [docs/wikist-spec.md](../../docs/wikist-spec.md) — formal AST node type specification
-- [docs/research.md](../../docs/research.md) — wikitext syntax research, prior art, design rationale
+- [docs/architecture.md](../../docs/architecture.md): full pipeline architecture and streaming model
+- [docs/wikist-spec.md](../../docs/wikist-spec.md): formal AST node type specification
+- [docs/research.md](../../docs/research.md): wikitext syntax research, prior art, design rationale

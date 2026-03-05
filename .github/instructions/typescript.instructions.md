@@ -66,20 +66,20 @@ applyTo: "**/*.ts,**/*.tsx"
 
 For every exported function, interface, type alias, and constant:
 
-- Write TSDoc in plain English — explain _why_ it exists, not just _what_ it is.
+- Write TSDoc in plain English: explain _why_ it exists, not just _what_ it is.
   Ground the reasoning in the problem being solved, the approach taken, and the
   assumptions/edge cases.
 - Every `@example` block must have a descriptive name that clarifies the
   scenario and behaviour being demonstrated:
 
   ````ts
-  // bad — fails deno doc --lint
+  // bad: fails deno doc --lint
   * @example
   * ```ts
   * align("hello");
   * ```
 
-  // good — named
+  // good: named
   * @example Aligning a multi-line value at its insertion column
   * ```ts
   * align("hello");
@@ -91,7 +91,7 @@ For every exported function, interface, type alias, and constant:
   - Example B: edge case or configuration variant
 - Every field of an exported interface or type needs its own JSDoc comment.
 - Any type referenced in a public function signature or interface must itself be
-  exported — otherwise `deno doc --lint` reports a `private-type-ref` error.
+  exported: otherwise `deno doc --lint` reports a `private-type-ref` error.
 
 For complex logic, include:
 

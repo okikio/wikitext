@@ -213,7 +213,7 @@ The session maintains this frontier and exposes two drain channels:
 - **Provisional tail events**: best-effort parse of incomplete content. May be
   replaced when more input arrives.
 
-**Replacement semantics (Model A — two channels with tail reset):** when new
+**Replacement semantics (Model A, two channels with tail reset):** when new
 input moves the stability frontier forward, the session emits a `tail-reset`
 marker followed by re-emitted events for the new provisional tail. Consumers
 that rendered the previous provisional tail discard it and re-render from the
@@ -221,8 +221,8 @@ new tail events. Stable events are append-only and never revoked. This model
 keeps consumer logic simple: stable events are committed, provisional events
 are always replaceable as a unit.
 
-(Alternative Model B — a "patch stream" where the session emits fine-grained
-insert/delete/replace ops on the previous provisional events — trades consumer
+(Alternative Model B, a "patch stream" where the session emits fine-grained
+insert/delete/replace ops on the previous provisional events, trades consumer
 simplicity for bandwidth efficiency. If Model A proves too expensive for large
 provisional tails, Model B is the fallback. Defer the choice until Phase 6
 implementation.)
@@ -334,12 +334,12 @@ snapshots enable incremental reparsing (Phase 7) by identifying the nearest
 
 **Neutral boundary definition**: a neutral boundary is a position where ALL
 of the following tracked parser state is at its default (empty/zero) value:
-- `openTemplateDepth` = 0 — no open `{{` awaiting `}}`
-- `openLinkDepth` = 0 — no open `[[` awaiting `]]`
-- `inTable` = false — not inside `{| ... |}`
-- `openTagStack` = [] — no open HTML tags
-- `inNowiki` = false — not inside `<nowiki>` or `<pre>`
-- (Phase 4+) quote state = clean — no unresolved apostrophe runs
+- `openTemplateDepth` = 0: no open `{{` awaiting `}}`
+- `openLinkDepth` = 0: no open `[[` awaiting `]]`
+- `inTable` = false: not inside `{| ... |}`
+- `openTagStack` = []: no open HTML tags
+- `inNowiki` = false: not inside `<nowiki>` or `<pre>`
+- (Phase 4+) quote state = clean: no unresolved apostrophe runs
 
 At a neutral boundary, parsing can resume from scratch without inheriting any
 state from prior content. This is what makes incremental reparsing safe:

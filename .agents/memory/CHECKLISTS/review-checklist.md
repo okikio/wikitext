@@ -6,7 +6,7 @@
 - [ ] Edge cases handled explicitly (empty input, single line, all whitespace,
       mixed line endings, unclosed tags, nested templates, apostrophe runs,
       malformed tables, mixed list markers).
-- [ ] Never-throw invariant preserved — parser produces valid output for all input.
+- [ ] Never-throw invariant preserved: parser produces valid output for all input.
 
 ## Safety
 
@@ -18,7 +18,7 @@
 
 - [ ] Naming is clear, intent-revealing, and consistent with the existing API.
 - [ ] Complex logic is explained with comments or ASCII diagrams.
-- [ ] `deno doc --lint mod.ts` still passes — no `private-type-ref` errors.
+- [ ] `deno doc --lint mod.ts` still passes: no `private-type-ref` errors.
 
 ## Performance
 

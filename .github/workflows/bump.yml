@@ -70,6 +70,6 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.RELEASE_TOKEN }}
           # forge reads GIT_NAME/GIT_EMAIL and sets them via git config
-          # on the bump branch before committing — no separate git config step needed.
+          # on the bump branch before committing. No separate git config step needed.
           GIT_NAME: "github-actions[bot]"
           GIT_EMAIL: "github-actions[bot]@users.noreply.github.com"

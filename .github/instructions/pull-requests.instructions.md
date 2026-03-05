@@ -20,27 +20,27 @@ Use Conventional Commit style: `type(scope optional): outcome`
 
 Write for reviewers and future archaeology. Be concrete.
 
-**Summary** — 1–3 bullets: what changed and in which module/function.
+**Summary**: 1–3 bullets: what changed and in which module/function.
 No generic goals like "improve quality" unless tied to a specific behavior
 change.
 
-**Problem / Motivation** — the real issue. Anchor it: "Before, X happened…" /
+**Problem / Motivation**: the real issue. Anchor it: "Before, X happened…" /
 "Callers couldn't…" / "The output was wrong when…"
 
-**Solution** — what changed at a high level and where (files/functions).
+**Solution**: what changed at a high level and where (files/functions).
 
-**Behavior changes** — if anything observable changes, list it plainly:
+**Behavior changes**: if anything observable changes, list it plainly:
 
 - output shape changes
 - edge case handling changes
 - breaking API changes (see `changelog-commits.instructions.md`)
 - performance / allocation changes
 
-**Verification** — list `deno task test` and `deno doc --lint mod.ts`, plus any
-manual checks. If not verified, say "Should verify by…" — don't claim you ran
+**Verification**: list `deno task test` and `deno doc --lint mod.ts`, plus any
+manual checks. If not verified, say "Should verify by…"; don't claim you ran
 them.
 
-**Risk & rollout** (when relevant) — what could break, edge cases, mitigations.
+**Risk & rollout** (when relevant): what could break, edge cases, mitigations.
 
 ## Writing constraints
 
@@ -53,11 +53,11 @@ them.
 When a PR introduces a non-trivial behavioral change or a new public API,
 include a design note using RFC structure:
 
-1. **Problem** — what is broken or missing
-2. **Goals / Non-goals** — scope and explicit exclusions
-3. **Constraints** — runtime, compatibility, performance, security
-4. **Proposal** — the approach, with ASCII diagrams if helpful
-5. **Alternatives considered** — why not the other options
+1. **Problem**: what is broken or missing
+2. **Goals / Non-goals**: scope and explicit exclusions
+3. **Constraints**: runtime, compatibility, performance, security
+4. **Proposal**: the approach, with ASCII diagrams if helpful
+5. **Alternatives considered**: why not the other options
 6. **Edge cases & failure modes**
 7. **Open questions**
 

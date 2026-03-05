@@ -5,7 +5,7 @@
 #   you review & publish the draft  →  this workflow fires
 #
 # Authentication:
-#   Uses GitHub's OIDC token — no JSR secret needed. JSR exchanges the
+#   Uses GitHub's OIDC token: no JSR secret needed. JSR exchanges the
 #   OIDC JWT for a short-lived publish token automatically, as long as
 #   the GitHub repo is linked in the JSR package settings.
 #
@@ -13,7 +13,7 @@
 #     jsr.io → @okikio/undent → Settings → GitHub Repository → link okikio/undent
 #
 # Safety:
-#   `deno publish` is idempotent — it exits cleanly if the version in
+#   `deno publish` is idempotent: it exits cleanly if the version in
 #   deno.json is already published to JSR, so accidental re-runs are safe.
 name: Publish
 
@@ -24,7 +24,7 @@ on:
 
 permissions:
   # id-token: write is required for JSR's OIDC publish flow.
-  # It mints a short-lived publish credential automatically — no secret needed.
+  # It mints a short-lived publish credential automatically: no secret needed.
   id-token: write
   contents: read
 
@@ -80,6 +80,6 @@ jobs:
         # which we suppress with `|| true` so re-runs of the workflow are safe.
         run: |
           cd npm
-          npm publish --access public || echo "Version already published — skipping."
+          npm publish --access public || echo "Version already published, skipping."
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

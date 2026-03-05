@@ -9,7 +9,7 @@ without drifting into “abstraction for abstraction’s sake”.
 ## About this project
 
 `@okikio/wikitext` is an event-stream-first wikitext source parser for Deno and
-npm. It parses wikitext markup into a structured AST ("wikist" — Wiki Syntax
+npm. It parses wikitext markup into a structured AST ("wikist": Wiki Syntax
 Tree, extending unist) while exposing the raw event stream as the fundamental
 interchange format.
 
@@ -19,23 +19,23 @@ quirk-matching is a future "mediawiki" profile, not an MVP goal.
 
 Flat file layout at root. `mod.ts` re-exports all public APIs. Key modules:
 
-- `ast.ts` — wikist node types, type guards, builders
-- `events.ts` — `WikitextEvent` union, constructors (range-first: offsets, not
+- `ast.ts`: wikist node types, type guards, builders
+- `events.ts`: `WikitextEvent` union, constructors (range-first: offsets, not
   strings)
-- `text_source.ts` — `TextSource` interface (string/rope/CRDT abstraction)
-- `token.ts` — `Token` interface, `TokenType` enum
-- `tokenizer.ts` — charCodeAt generator-based scanner over `TextSource`
-- `block_parser.ts` — block-level event emitter
-- `inline_parser.ts` — inline event enrichment
-- `parse.ts` — orchestration (tokenizer → block → inline → tree)
-- `tree_builder.ts` — `buildTree(events) → WikistRoot`
-- `session.ts` — stateful `Session` wrapper (Phases 5–7)
-- `stringify.ts` — AST → wikitext (round-trip)
-- `filter.ts` — filter/visit for tree and event streams
+- `text_source.ts`: `TextSource` interface (string/rope/CRDT abstraction)
+- `token.ts`: `Token` interface, `TokenType` enum
+- `tokenizer.ts`: charCodeAt generator-based scanner over `TextSource`
+- `block_parser.ts`: block-level event emitter
+- `inline_parser.ts`: inline event enrichment
+- `parse.ts`: orchestration (tokenizer → block → inline → tree)
+- `tree_builder.ts`: `buildTree(events) → WikistRoot`
+- `session.ts`: stateful `Session` wrapper (Phases 5--7)
+- `stringify.ts`: AST → wikitext (round-trip)
+- `filter.ts`: filter/visit for tree and event streams
 
 ## Architecture overview
 
-Events — not AST — are the fundamental output. Everything else is a consumer:
+Events, not AST, are the fundamental output. Everything else is a consumer:
 
 ```
 TextSource ─► Tokenizer ─► Event Stream ─► [Consumer]
@@ -54,19 +54,19 @@ source, not extracted strings.
 
 Three streaming modes, all event-well-formed (stack discipline):
 
-- `outlineEvents(input)` — block-only, no inline parsing
-- `events(input)` — full enter/exit/text events
-- `parseChunked(chunks)` — progressive completed block nodes (async)
+- `outlineEvents(input)`: block-only, no inline parsing
+- `events(input)`: full enter/exit/text events
+- `parseChunked(chunks)`: progressive completed block nodes (async)
 
 ### Parser contracts
 
-1. **Event well-formedness** — every `enter(X)` has matching `exit(X)`, proper
+1. **Event well-formedness**: every `enter(X)` has matching `exit(X)`, proper
    nesting (stack discipline)
-2. **UTF-16 offsets** — `position.offset` is a UTF-16 code unit index (matches
+2. **UTF-16 offsets**: `position.offset` is a UTF-16 code unit index (matches
    `string.charCodeAt(i)`)
-3. **Never-throw** — parser produces a valid tree for any input, with optional
+3. **Never-throw**: parser produces a valid tree for any input, with optional
    error events for recovery points
-4. **Determinism** — same input + same config → same events, same tree
+4. **Determinism**: same input + same config → same events, same tree
 
 ## Commands
 
@@ -145,14 +145,14 @@ For complex logic, include:
 
 ### Performance discipline
 
-- `charCodeAt`, not `charAt` — avoid string allocation per character.
-- Offset-based tokens (start/end into source), not value strings — avoids
+- `charCodeAt`, not `charAt`: avoid string allocation per character.
+- Offset-based tokens (start/end into source), not value strings: avoids
   per-token allocation and V8 sliced-string retention.
-- Range-first events — text events carry offset ranges, not extracted strings.
+- Range-first events: text events carry offset ranges, not extracted strings.
 - All modules accept `TextSource`, not bare `string`.
 - Single-pass scanning with bounded lookahead.
-- Fresh immutable objects per yield — no object reuse across generator yields.
-- JIT-friendly hot loops — no megamorphic call sites, no closures per character.
+- Fresh immutable objects per yield: no object reuse across generator yields.
+- JIT-friendly hot loops: no megamorphic call sites, no closures per character.
 
 ### Configuration
 
@@ -163,15 +163,15 @@ For complex logic, include:
 
 When making a behavioral change, touch all of these before closing the task:
 
-1. **Confirm all behavioral changes with user** — ask for confirmation on the
+1. **Confirm all behavioral changes with user**: ask for confirmation on the
    proposed change and its scope before implementing.
-2. **Tests** — update or add assertions that reflect the new behavior.
-3. **TSDoc** — update tsdocs behaviour explanations including `@example` blocks
+2. **Tests**: update or add assertions that reflect the new behavior.
+3. **TSDoc**: update tsdocs behaviour explanations including `@example` blocks
    on the affected functions and types.
-4. **README** — update the relevant docs sections including usage sections with
+4. **README**: update the relevant docs sections including usage sections with
    matching examples.
-5. **CHANGELOG** — note the change under the correct version heading.
-6. **Instructions** — if the change affects how tests, benchmarks, commits, or
+5. **CHANGELOG**: note the change under the correct version heading.
+6. **Instructions**: if the change affects how tests, benchmarks, commits, or
    documentation should be written, update the relevant file in
    `.github/instructions/`.
 
@@ -185,7 +185,7 @@ When making a behavioral change, touch all of these before closing the task:
 
 ### Instructions (always-on rules, auto-loaded by `applyTo`)
 
-Targeted rules live under `.github/instructions/`. These are prescriptive —
+Targeted rules live under `.github/instructions/`. These are prescriptive:
 follow them whenever you work on a matching file.
 
 | File                                | Applies to                       |
@@ -201,9 +201,9 @@ follow them whenever you work on a matching file.
 
 ### Guides (situational reference, read on demand)
 
-Reference material lives under `.agents/guides/`. These are descriptive —
+Reference material lives under `.agents/guides/`. These are descriptive:
 read them when the task calls for it, not necessarily on every edit.
 
 | File                   | When to read                                                |
 | ---------------------- | ----------------------------------------------------------- |
-| `codebase-patterns.md` | Before touching core modules — architecture, pipeline, perf |
+| `codebase-patterns.md` | Before touching core modules: architecture, pipeline, perf |

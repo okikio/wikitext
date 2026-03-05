@@ -1,11 +1,11 @@
-# Codebase Patterns — Wikitext Parser
+# Codebase Patterns: Wikitext Parser
 
 Reference for the key architecture, data flow, and internal patterns.
 Read this before making any non-trivial change to core modules.
 
 ## Pipeline architecture
 
-Events — not AST — are the fundamental output. Everything else is a consumer.
+Events, not AST, are the fundamental output. Everything else is a consumer.
 The pipeline accepts any `TextSource` (plain `string` satisfies the interface).
 
 ```
@@ -33,7 +33,7 @@ Three streaming modes, all event-well-formed (stack discipline):
 | Full | `events(input)` | Block + inline | Default, tree building |
 | Progressive | `parseChunked(chunks)` | Async block nodes | Streaming render |
 
-All event modes produce **range-first events** — text/token events carry
+All event modes produce **range-first events**: text/token events carry
 `startOffset`/`endOffset` into the `TextSource` rather than an extracted
 `value` string. Consumers call `slice(source, evt)` to resolve text on demand.
 
@@ -60,7 +60,7 @@ require changing any parser module.
 ## Tokenizer (`tokenizer.ts`)
 
 Generator-based scanner using `charCodeAt` on the `TextSource`. Yields
-`Token` objects with offset ranges — never value strings.
+`Token` objects with offset ranges, never value strings.
 
 ### Token design (offset-based)
 
@@ -69,14 +69,14 @@ interface Token {
   type: TokenType;
   start: number;   // UTF-16 code unit offset into TextSource
   end: number;     // exclusive end offset
-  // No `value` field — use slice(source, token) to resolve on demand
+  // No `value` field: use slice(source, token) to resolve on demand
 }
 ```
 
 Why offsets instead of value strings:
 - Avoids per-token string allocation
 - Sidesteps V8's sliced-string retention risk (small slice *can* pin entire
-  parent string — behavior is heuristic-driven, not unconditional)
+  parent string; behavior is heuristic-driven, not unconditional)
 - Consumer calls `slice(source, token)` only when it needs the text
 - Works identically with `TextSource` implementations that aren't `string`
 
@@ -111,14 +111,14 @@ Hot scanning loops use integer character codes:
 
 ### Scanning rules
 
-- **Single pass** — never backtracks more than bounded lookahead
+- **Single pass**: never backtracks more than bounded lookahead
   (max 4 chars: `<!--` for comment open)
 - **Line-start markers** only recognized at start of line (after optional
   whitespace): `=`, `*`, `#`, `:`, `;`, `{|`, `|-`, `|}`, `----`, ` `
-- **Apostrophe runs** emitted as single `APOSTROPHE_RUN(length)` token —
+- **Apostrophe runs** emitted as single `APOSTROPHE_RUN(length)` token;
   disambiguation deferred to inline parser
 - **Comment/nowiki regions** pre-scanned to protect content from tokenization
-- **Fresh objects per yield** — no object reuse across generator yields
+- **Fresh objects per yield**: no object reuse across generator yields
 
 ## Block parser (`block_parser.ts`)
 
@@ -151,7 +151,7 @@ Enables incremental reparsing (Phase 7) to find the nearest "neutral
 boundary" when determining where to start reparsing after an edit.
 
 **Neutral boundary**: a position where all tracked parser state is at its
-default (empty/zero) value — `openTemplateDepth` = 0, `openLinkDepth` = 0,
+default (empty/zero) value: `openTemplateDepth` = 0, `openLinkDepth` = 0,
 `inTable` = false, `openTagStack` = [], `inNowiki` = false, quote state
 clean. Parsing can resume from scratch at a neutral boundary without
 inheriting state from prior content.
@@ -187,7 +187,7 @@ stack for nesting.
 
 **HTML tags:**
 - Self-closing, void elements, matching open/close pairs
-- Extension tags (`<ref>`, `<nowiki>`, `<pre>`, etc.) — content protected
+- Extension tags (`<ref>`, `<nowiki>`, `<pre>`, etc.): content protected
 
 **Special constructs:**
 - `~~~`/`~~~~`/`~~~~~` → Signature
@@ -203,16 +203,16 @@ Consumes the event stream, produces a wikist tree (unist-compatible AST).
 Every `enter` pushes onto a stack, every `exit` pops and attaches to parent.
 `text` events become `Text` leaf nodes.
 
-Supports `{ inlineMode: "lazy" }` — inline content stays as `Text` nodes
+Supports `{ inlineMode: "lazy" }`: inline content stays as `Text` nodes
 until `resolveInlines(node)` is called on demand.
 
 ## Position semantics
 
 All positions use UTF-16 code unit offsets (matching JS string indexing):
 
-- `line` — 1-indexed (first line = 1)
-- `column` — 1-indexed, UTF-16 code units from start of line
-- `offset` — 0-indexed, UTF-16 code units from start of input
+- `line`: 1-indexed (first line = 1)
+- `column`: 1-indexed, UTF-16 code units from start of line
+- `offset`: 0-indexed, UTF-16 code units from start of input
 - `input.slice(start.offset, end.offset)` returns the source text
 
 ## Error recovery
@@ -233,12 +233,12 @@ points that consumers can log or ignore.
 
 ## Performance discipline
 
-- `charCodeAt`, not `charAt` — avoid string allocation per character
-- Offset-based tokens, not value strings — avoid per-token allocation
-- Range-first events — no `value` strings on text events
+- `charCodeAt`, not `charAt`: avoid string allocation per character
+- Offset-based tokens, not value strings: avoid per-token allocation
+- Range-first events: no `value` strings on text events
 - Single-pass scanning with bounded lookahead
-- Fresh immutable objects per yield — no object reuse across generator yields
-- JIT-friendly hot loops — no megamorphic call sites, no closures per character
+- Fresh immutable objects per yield: no object reuse across generator yields
+- JIT-friendly hot loops: no megamorphic call sites, no closures per character
 - No closures allocated in inner loops
 
 ## Session API (`session.ts`)
@@ -253,7 +253,7 @@ phases:
 | 7 | `.applyChanges(edits)` → `PositionMap`, edit coalescing |
 
 Session delegates to pipeline modules and caches parse state. It is not a
-God object — each phase adds minimal API surface.
+God object; each phase adds minimal API surface.
 
 ### Stability frontier
 
@@ -295,4 +295,4 @@ Flat files at root alongside `mod.ts`. No `src/` folder.
 | `mod.ts` | Re-exports all public APIs |
 
 For the current full public API, run `deno doc mod.ts` or read the exports at
-the top of `mod.ts` directly — duplicating that list here would only drift.
+the top of `mod.ts` directly. Duplicating that list here would only drift.

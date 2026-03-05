@@ -37,11 +37,11 @@ written standard.
   behavior. Content inside `<nowiki>` is protected from parsing.
 
 - **Behavior switches.** `__TOC__`, `__NOTOC__`, `__FORCETOC__`,
-  `__NOEDITSECTION__` — double-underscore tokens that control rendering
+  `__NOEDITSECTION__`: double-underscore tokens that control rendering
   behavior rather than producing visible content.
 
 - **Signatures.** `~~~` (username), `~~~~` (username + timestamp), `~~~~~`
-  (timestamp only) — substituted by MediaWiki on save.
+  (timestamp only). Substituted by MediaWiki on save.
 
 ### Apostrophe run disambiguation
 
@@ -419,7 +419,7 @@ versus viewed directly:
 | `<includeonly>...</includeonly>` | Content visible | Content hidden |
 | `<onlyinclude>...</onlyinclude>` | Only this content shown | Content visible |
 
-These are distinct from extension tags — they control transclusion scoping,
+These are distinct from extension tags: they control transclusion scoping,
 not rendering. The parser must model them as structural nodes (not just generic
 HTML tags) because they affect what content is "active" depending on context.
 

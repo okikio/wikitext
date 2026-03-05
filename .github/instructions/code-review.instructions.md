@@ -26,7 +26,7 @@ Avoid noise: fewer, higher-signal comments.
 ### 3. Types & narrowing
 
 - Avoid `any`. Prefer generics, unions, discriminated unions, and narrowing.
-- Every type referenced in a public signature must itself be exported —
+- Every type referenced in a public signature must itself be exported:
   `deno doc --lint` will catch `private-type-ref` errors.
 - Return types at module boundaries should be explicit and narrow.
 
@@ -49,5 +49,5 @@ Match repo formatting and import conventions. See `typescript.instructions.md`.
 Use tags: `[BLOCKER]`, `[IMPORTANT]`, `[SUGGESTION]`, `[NIT]`
 
 - Provide a concrete fix suggestion for every `[BLOCKER]` and `[IMPORTANT]`.
-- Avoid generic feedback like "improve quality" — tie every comment to a
+- Avoid generic feedback like "improve quality": tie every comment to a
   specific behavior, risk, or readability issue.

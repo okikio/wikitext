@@ -6,7 +6,7 @@ applyTo: "**/*.ts,**/*.md"
 # ASCII Diagrams
 
 Use ASCII diagrams to make complex systems, data flows, and algorithms visually
-understandable. Diagrams should clarify—not decorate.
+understandable. Diagrams should clarify, not decorate.
 
 ## When to Use
 

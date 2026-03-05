@@ -54,23 +54,23 @@ Three base categories, mirroring unist:
 
 | Node | Category | Parent type | Extra fields |
 |------|----------|-------------|--------------|
-| `Root` | Parent | (document root) | — |
+| `Root` | Parent | (document root) | (none) |
 | `Heading` | Parent | Root | `level: 1\|2\|3\|4\|5\|6` |
-| `Paragraph` | Parent | Root, ListItem, TableCell, etc. | — |
-| `ThematicBreak` | Void | Root | — |
-| `Preformatted` | Parent | Root | — |
+| `Paragraph` | Parent | Root, ListItem, TableCell, etc. | (none) |
+| `ThematicBreak` | Void | Root | (none) |
+| `Preformatted` | Parent | Root | (none) |
 | `List` | Parent | Root, ListItem | `ordered: boolean` |
 | `ListItem` | Parent | List | `marker: string` |
-| `DefinitionList` | Parent | Root | — |
-| `DefinitionTerm` | Parent | DefinitionList | — |
-| `DefinitionDescription` | Parent | DefinitionList | — |
+| `DefinitionList` | Parent | Root | (none) |
+| `DefinitionTerm` | Parent | DefinitionList | (none) |
+| `DefinitionDescription` | Parent | DefinitionList | (none) |
 | `Table` | Parent | Root | `attributes?: string` |
-| `TableCaption` | Parent | Table | — |
+| `TableCaption` | Parent | Table | (none) |
 | `TableRow` | Parent | Table | `attributes?: string` |
 | `TableCell` | Parent | TableRow | `header: boolean`, `attributes?: string` |
-| `Bold` | Parent | (inline context) | — |
-| `Italic` | Parent | (inline context) | — |
-| `BoldItalic` | Parent | (inline context) | — |
+| `Bold` | Parent | (inline context) | (none) |
+| `Italic` | Parent | (inline context) | (none) |
+| `BoldItalic` | Parent | (inline context) | (none) |
 | `Wikilink` | Parent | (inline context) | `target: string` |
 | `ExternalLink` | Parent | (inline context) | `url: string` |
 | `ImageLink` | Parent | (inline context) | `target: string` |
@@ -82,13 +82,13 @@ Three base categories, mirroring unist:
 | `MagicWord` | Void | (inline context) | `name: string` |
 | `BehaviorSwitch` | Void | (inline context) | `name: string` |
 | `HtmlTag` | Parent | (inline context) | `tagName: string`, `selfClosing: boolean`, `attributes?: Record<string, string>` |
-| `HtmlEntity` | Literal | (inline context) | — |
-| `Text` | Literal | (any parent) | — |
-| `Nowiki` | Literal | (inline context) | — |
-| `Comment` | Literal | (any) | — |
+| `HtmlEntity` | Literal | (inline context) | (none) |
+| `Text` | Literal | (any parent) | (none) |
+| `Nowiki` | Literal | (inline context) | (none) |
+| `Comment` | Literal | (any) | (none) |
 | `Redirect` | Parent | Root | `target: string` |
 | `Signature` | Void | (inline context) | `tildes: 3\|4\|5` |
-| `Break` | Void | (inline context) | — |
+| `Break` | Void | (inline context) | (none) |
 | `Gallery` | Parent | Root | `attributes?: Record<string, string>` |
 | `Reference` | Parent | (inline context) | `name?: string`, `group?: string` |
 | `Conflict` | Parent | (any) | `variants: WikistNode[][]` **(reserved)** |
@@ -285,7 +285,7 @@ interface ExternalLink {
 Image embeds: `[[File:Example.png|thumb|Caption]]` or `[[Image:...]]`.
 
 A leading colon (`[[:File:Foo.png]]`) produces a `Wikilink` instead of an
-`ImageLink` — it becomes a visible link to the file page, not an image embed.
+`ImageLink`: it becomes a visible link to the file page, not an image embed.
 
 ```ts
 interface ImageLink {
@@ -300,7 +300,7 @@ interface ImageLink {
 Category tags: `[[Category:Name]]` or `[[Category:Name|sort key]]`.
 
 A leading colon (`[[:Category:Foo]]`) produces a `Wikilink` instead of a
-`CategoryLink` — it becomes a visible link to the category page, not a
+`CategoryLink`: it becomes a visible link to the category page, not a
 category assignment.
 
 ```ts
@@ -559,13 +559,13 @@ analysis.
 The `ast.ts` module exports type guard functions and builder helpers:
 
 ```ts
-// Type guards — narrow WikistNode to a specific type
+// Type guards: narrow WikistNode to a specific type
 function isHeading(node: WikistNode): node is Heading;
 function isTemplate(node: WikistNode): node is Template;
 function isText(node: WikistNode): node is Text;
 // ... one per node type
 
-// Builders — construct nodes with required fields
+// Builders: construct nodes with required fields
 function heading(level: 1|2|3|4|5|6, children: WikistNode[]): Heading;
 function text(value: string): Text;
 function template(name: string, args: TemplateArgument[]): Template;

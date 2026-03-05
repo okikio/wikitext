@@ -1,9 +1,9 @@
 # Runs on every push and pull request to keep main green.
 #
 # Jobs:
-#   lint   — deno lint (static analysis, no false positives)
-#   fmt    — deno fmt --check (formatting gate; use `deno fmt` locally to fix)
-#   test   — full test suite with leak tracing + GC exposure
+#   lint   - deno lint (static analysis, no false positives)
+#   fmt    - deno fmt --check (formatting gate; use `deno fmt` locally to fix)
+#   test   - full test suite with leak tracing + GC exposure
 name: CI
 
 on:

@@ -9,14 +9,14 @@ applyTo: "**/*.md,**/*.ts,**/*.tsx"
 
 Lead with user benefit, not internal mechanics:
 
-1. **What is it?** — one plain-English sentence about what the thing is.
-2. **What does it do?** — what problem it solves and what happens when you use
+1. **What is it?** One plain-English sentence about what the thing is.
+2. **What does it do?** What problem it solves and what happens when you use
    it.
-3. **What do you get?** — the concrete benefit: cleaner output, less code, fewer
+3. **What do you get?** The concrete benefit: cleaner output, less code, fewer
    bugs, etc.
-4. **How does it work?** — the high-level approach, key techniques, and broader
+4. **How does it work?** The high-level approach, key techniques, and broader
    intent/reasoning behind the system.
-5. **Grounding example & details** — metaphors, charts, diagrams, tables, lists,
+5. **Grounding example & details.** Metaphors, charts, diagrams, tables, lists,
    blockquotes, code examples, assumptions, edge cases, limitations, and other
    important context.
 
@@ -26,7 +26,7 @@ and any prose that introduces a concept.
 ## Writing style
 
 - Write with a clear narrative and smooth transitions. Aim to have a smooth flow
-  and steady pace. Section headers interrupt flow — prefer prose that moves:
+  and steady pace. Section headers interrupt flow; prefer prose that moves:
   intent, context, approach, edge cases, examples, background, reasoning.
 - Use plain English. When technical terms are necessary, define them clearly and
   ground them in context.

@@ -22,7 +22,7 @@ import { expect } from "jsr:@std/expect";
 import * as fc from "npm:fast-check";
 ```
 
-Always run tests with `deno task test` — the flags `--trace-leaks` and
+Always run tests with `deno task test`: the flags `--trace-leaks` and
 `--v8-flags=--expose-gc` are required to catch resource leaks and enable GC
 control in property-based tests.
 
@@ -33,13 +33,13 @@ Never assert on internal state, private methods, or implementation details. A
 refactor that preserves observable behavior must not break any test.
 
 For the wikitext parser, this means testing through `parse()`, `events()`,
-`outlineEvents()`, `stringify()`, and `tokens()` — not through internal parser
+`outlineEvents()`, `stringify()`, and `tokens()`, not through internal parser
 state.
 
 ## Test independence and determinism
 
 - No shared mutable state between tests.
-- No ordering dependencies — tests must pass in any order.
+- No ordering dependencies: tests must pass in any order.
 - No reliance on wall-clock time, random seeds, or external resources unless
   clearly isolated.
 - One logical behavior per test. If a test description needs "and", split it.
@@ -75,7 +75,7 @@ they are the highest-leverage test type.
 
 Import fast-check via `npm:fast-check` and verify these invariants:
 
-**Never-throw** — the parser produces a valid tree for any input:
+**Never-throw**: the parser produces a valid tree for any input:
 
 ```ts
 fc.assert(
@@ -86,7 +86,7 @@ fc.assert(
 );
 ```
 
-**Round-trip stability** — parse then stringify then parse again yields the same
+**Round-trip stability**: parse then stringify then parse again yields the same
 tree:
 
 ```ts
@@ -99,7 +99,7 @@ fc.assert(
 );
 ```
 
-**Event well-formedness** — every `enter` has a matching `exit`, nesting is
+**Event well-formedness**: every `enter` has a matching `exit`, nesting is
 balanced:
 
 ```ts
@@ -115,7 +115,7 @@ fc.assert(
 );
 ```
 
-**Position monotonicity** — offsets never decrease within the event stream:
+**Position monotonicity**: offsets never decrease within the event stream:
 
 ```ts
 fc.assert(
@@ -131,7 +131,7 @@ fc.assert(
 );
 ```
 
-**Token coverage** — tokens span every UTF-16 code unit of the input with no
+**Token coverage**: tokens span every UTF-16 code unit of the input with no
 gaps and no overlaps:
 
 ```ts

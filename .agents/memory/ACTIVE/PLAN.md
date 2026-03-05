@@ -1,4 +1,4 @@
-# Plan: Wikitext Parser — Event-Driven AST Library
+# Plan: Wikitext Parser, Event-Driven AST Library
 
 ## Outcome
 
@@ -35,29 +35,29 @@ but no streaming or unist compatibility.
 
 See `docs/architecture.md` for the full pipeline design. In summary:
 
-1. **Tokenizer** — charCodeAt generator yielding offset-based tokens
-2. **Block parser** — consumes tokens, emits block-level enter/exit events
-3. **Inline parser** — enriches block events with inline markup events
-4. **Consumers** — buildTree, compileHtml, filterEvents, direct callbacks
+1. **Tokenizer**: charCodeAt generator yielding offset-based tokens
+2. **Block parser**: consumes tokens, emits block-level enter/exit events
+3. **Inline parser**: enriches block events with inline markup events
+4. **Consumers**: buildTree, compileHtml, filterEvents, direct callbacks
 
 ## Phases
 
-- **Phase 0** — Rewrite copilot instructions, docs, build config ✅
-- **Phase 1** — AST spec (`ast.ts`) + event types (`events.ts`) + `TextSource`
+- **Phase 0**: Rewrite copilot instructions, docs, build config ✅
+- **Phase 1**: AST spec (`ast.ts`) + event types (`events.ts`) + `TextSource`
   interface + range-first event payloads
-- **Phase 2** — Tokenizer (`token.ts`, `tokenizer.ts`) over `TextSource`
-- **Phase 3** — Block parser (`block_parser.ts`) + fuzz start. Session begins
+- **Phase 2**: Tokenizer (`token.ts`, `tokenizer.ts`) over `TextSource`
+- **Phase 3**: Block parser (`block_parser.ts`) + fuzz start. Session begins
   life here: outline overlay is the first live view.
-- **Phase 4** — Inline parser (`inline_parser.ts`)
-- **Phase 5** — Public API, tree builder, stringify, filter + corpus tests.
+- **Phase 4**: Inline parser (`inline_parser.ts`)
+- **Phase 5**: Public API, tree builder, stringify, filter + corpus tests.
   Session-based API lands (`createSession()` with `.events()`, `.outline()`,
   `.parse()`).
-- **Phase 6** — Async streaming, push API, progressive blocks. Stability
+- **Phase 6**: Async streaming, push API, progressive blocks. Stability
   frontier and stable/provisional drain support. `session.write(chunk)` +
   `session.drainStableEvents()`.
-- **Phase 7** — Incremental reparsing, direct HTML compilation.
+- **Phase 7**: Incremental reparsing, direct HTML compilation.
   `session.applyChanges(edits)` with batch coalescing, `PositionMap` return.
-- **Phase 8** — Extensions, unified plugins, profiles, scaled hardening.
+- **Phase 8**: Extensions, unified plugins, profiles, scaled hardening.
   Optional `Conflict` node type. Anchor API if needed (or separate package).
   Collab engine adapters.
 

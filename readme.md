@@ -6,25 +6,25 @@
 # @okikio/wikitext
 
 An event-stream-first wikitext source parser for Deno and npm. Parses wikitext
-markup into a structured AST ("wikist" — Wiki Syntax Tree, extending
+markup into a structured AST ("wikist": Wiki Syntax Tree, extending
 [unist](https://github.com/syntax-tree/unist)) while exposing the raw event
 stream as the fundamental interchange format.
 
 The parser produces a faithful structural model of all documented wikitext
-constructs. It does not expand templates or render HTML — it is a source parser.
+constructs. It does not expand templates or render HTML: it is a source parser.
 
 ## Features
 
-- **Event-stream-first architecture** — events are the fundamental output; AST,
+- **Event-stream-first architecture**: events are the fundamental output; AST,
   HTML compilation, and filtering are all consumers of the same event stream.
-- **Three streaming modes** — `outlineEvents()` (block-only), `events()` (full),
+- **Three streaming modes**: `outlineEvents()` (block-only), `events()` (full),
   and `parseChunked()` (progressive completed blocks).
-- **Never throws** — produces a valid tree for any input with error recovery.
-- **Round-trip fidelity** — `stringify(parse(input))` preserves the original
+- **Never throws**: produces a valid tree for any input with error recovery.
+- **Round-trip fidelity**: `stringify(parse(input))` preserves the original
   wikitext.
-- **UTF-16 position semantics** — offsets match `string.charCodeAt(i)` and LSP.
-- **unist-compatible** — works with `unist-util-visit` and the unified ecosystem.
-- **High performance** — `charCodeAt` scanning, offset-based tokens, single-pass
+- **UTF-16 position semantics**: offsets match `string.charCodeAt(i)` and LSP.
+- **unist-compatible**: works with `unist-util-visit` and the unified ecosystem.
+- **High performance**: `charCodeAt` scanning, offset-based tokens, single-pass
   with bounded lookahead, JIT-friendly hot loops.
 
 ## Install
@@ -76,7 +76,7 @@ Input ──► Tokenizer ──► Event Stream ──► [Consumer]
               └─► raw token stream (lowest cost)
 ```
 
-Events — not AST — are the fundamental output. The token stream is exposed for
+Events, not AST, are the fundamental output. The token stream is exposed for
 lowest-cost consumers (search, grep). The event stream adds structure
 (enter/exit pairs). The tree builder, HTML compiler, and filter utilities are all
 event consumers.

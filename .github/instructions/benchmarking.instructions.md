@@ -12,7 +12,7 @@ JavaScript benchmarks.
 ## Non-negotiable: always call `do_not_optimize()`
 
 The JIT compiler (V8) can detect that a computation's result is unused and
-eliminate the entire call — measuring an empty loop instead of your code.
+eliminate the entire call, measuring an empty loop instead of your code.
 `do_not_optimize()` forces the result to be "consumed" without actually using
 it.
 
@@ -32,7 +32,7 @@ fast benchmark numbers. Treat any benchmark missing it as broken.
 ## Prevent constant folding with computed parameters
 
 The JIT can prove that a template string array (TSA) is always the same frozen
-object and cache the entire result, hoisting it out of the loop (LICM — Loop
+object and cache the entire result, hoisting it out of the loop (LICM: Loop
 Invariant Code Motion). Use mitata's computed parameter syntax to generate fresh
 input values outside the measured region:
 
@@ -119,17 +119,17 @@ puts them side-by-side.
 Microbenchmarks with degenerate inputs (empty string, single heading) don't
 represent real usage. Include benchmarks for each of these patterns:
 
-- **Token-only** — `[...tokens(input)]`. Measures raw scanner throughput without
+- **Token-only**: `[...tokens(input)]`. Measures raw scanner throughput without
   any structure building.
-- **Events-only** — `[...events(input)]`. Measures the full event pipeline
+- **Events-only**: `[...events(input)]`. Measures the full event pipeline
   (tokenize + block + inline) without tree allocation.
-- **Full AST** — `parse(input)`. End-to-end: tokenize, events, tree build.
-- **Round-trip** — `stringify(parse(input))`. Full cycle including serialization.
-- **Outline-only** — `[...outlineEvents(input)]`. Block structure only, no
+- **Full AST**: `parse(input)`. End-to-end: tokenize, events, tree build.
+- **Round-trip**: `stringify(parse(input))`. Full cycle including serialization.
+- **Outline-only**: `[...outlineEvents(input)]`. Block structure only, no
   inline parsing cost. Compare against full events to show the speedup.
-- **Large article** — a real Wikipedia Featured Article (50K–200K chars). This
+- **Large article**: a real Wikipedia Featured Article (50K–200K chars). This
   exercises all code paths and exposes allocation pressure.
-- **Pathological input** — deeply nested templates, 1000-row tables, long
+- **Pathological input**: deeply nested templates, 1000-row tables, long
   apostrophe runs. Exercises worst-case performance.
 
 ## Memory tests must be proper mitata benchmarks
@@ -145,16 +145,16 @@ Don't mix manual `performance.memory` checks inside mitata benchmark callbacks.
 
 ## Anti-patterns
 
-- **Discarding return values** — always `do_not_optimize()` the result.
-- **Same literal in every iteration** — use computed parameters to prevent LICM.
-- **Benchmarking only the happy path** — include at least one pathological input
+- **Discarding return values**: always `do_not_optimize()` the result.
+- **Same literal in every iteration**: use computed parameters to prevent LICM.
+- **Benchmarking only the happy path**: include at least one pathological input
   (e.g., deeply nested indentation, very long lines) alongside common inputs.
-- **No competitor baseline** — if you can't show the parser is faster than
+- **No competitor baseline**: if you can't show the parser is faster than
   wtf_wikipedia or wikiparser-node on a given operation, don't claim it is.
 
 ## Live-editing benchmark suites (Phase 6–7)
 
-These benchmarks measure interactive and streaming performance — not batch
+These benchmarks measure interactive and streaming performance, not batch
 parsing. Implement them when the Session API lands.
 
 ### Keystroke loop (Phase 7)
@@ -176,7 +176,7 @@ bench("keystroke: insert char mid-document", () => {
 ```
 
 Target: < 5 ms per keystroke on a 100K-char article. Each iteration must
-include the full reparse — don't measure only `applyChanges`.
+include the full reparse; don't measure only `applyChanges`.
 
 ### Append-only stream (Phase 6)
 
@@ -211,4 +211,4 @@ bench("merge: 50 remote edits in burst", () => {
 ```
 
 Compare against 50 individual `applyChanges` calls to show coalescing wins.
-Use `.gc('inner')` — these allocate heavily.
+Use `.gc('inner')`: these allocate heavily.

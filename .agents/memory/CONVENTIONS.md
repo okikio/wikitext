@@ -23,8 +23,8 @@ survives context resets.
 - Promote architectural decisions to ADRs in `DECISIONS/`.
 - Run `deno task test`, `deno task bench`, and `deno doc --lint mod.ts` before
   marking any API-touching task complete.
-- The parser never throws — enforce the never-throw invariant in every change.
-- Offset-based tokens only — never store value strings on tokens.
+- The parser never throws: enforce the never-throw invariant in every change.
+- Offset-based tokens only: never store value strings on tokens.
 
 ## Edge cases
 
@@ -32,7 +32,7 @@ If work spans multiple iterations, capture risks in `ACTIVE/RISKS.md` to avoid
 context loss.
 
 Wikitext-specific edge cases to always consider:
-- Unclosed bold/italic, `[[`, `{{` — error recovery, not exceptions
+- Unclosed bold/italic, `[[`, `{{`: error recovery, not exceptions
 - Mixed line endings (`\n`, `\r\n`, bare `\r`)
 - Surrogate pairs (emoji, CJK)
 - Deeply nested templates/tables

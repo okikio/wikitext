@@ -3,7 +3,7 @@
 ## Outcome
 
 `@okikio/wikitext` is an event-stream-first wikitext source parser for Deno and
-npm. It parses wikitext markup into a structured AST ("wikist" — Wiki Syntax
+npm. It parses wikitext markup into a structured AST ("wikist": Wiki Syntax
 Tree, extending unist) while exposing the raw event stream as the fundamental
 interchange format.
 
@@ -12,33 +12,33 @@ interchange format.
 - Runtime: Deno v2, TypeScript (strict), ESM
 - Published to: JSR and npm
 - Flat file layout at root; `mod.ts` re-exports all public APIs
-- Source parser only — no template expansion or HTML rendering
+- Source parser only: no template expansion or HTML rendering
 
 ## Key modules
 
-- `ast.ts` — wikist node types (26+), type guards, builders
-- `events.ts` — `WikitextEvent` union, constructors
-- `token.ts` — `Token` interface, `TokenType` enum
-- `tokenizer.ts` — charCodeAt generator-based scanner
-- `block_parser.ts` — block-level event emitter
-- `inline_parser.ts` — inline event enrichment
-- `parse.ts` — orchestration (tokenizer → block → inline → tree)
-- `tree_builder.ts` — `buildTree(events) → WikistRoot`
-- `stringify.ts` — AST → wikitext (round-trip)
-- `filter.ts` — filter/visit for tree and event streams
+- `ast.ts`: wikist node types (26+), type guards, builders
+- `events.ts`: `WikitextEvent` union, constructors
+- `token.ts`: `Token` interface, `TokenType` enum
+- `tokenizer.ts`: charCodeAt generator-based scanner
+- `block_parser.ts`: block-level event emitter
+- `inline_parser.ts`: inline event enrichment
+- `parse.ts`: orchestration (tokenizer → block → inline → tree)
+- `tree_builder.ts`: `buildTree(events) → WikistRoot`
+- `stringify.ts`: AST → wikitext (round-trip)
+- `filter.ts`: filter/visit for tree and event streams
 
 ## Key exports
 
-- **Core API** — `parse()`, `events()`, `outlineEvents()`, `stringify()`
-- **Low-level** — `tokens()`, `buildTree()`, `slice()`
-- **Filtering** — `filter()`, `visit()`, `filterTemplates()`, `filterLinks()`
+- **Core API**: `parse()`, `events()`, `outlineEvents()`, `stringify()`
+- **Low-level**: `tokens()`, `buildTree()`, `slice()`
+- **Filtering**: `filter()`, `visit()`, `filterTemplates()`, `filterLinks()`
 
 ## Architecture
 
-Events — not AST — are the fundamental output. Three streaming modes:
-- `outlineEvents(input)` — block-only, no inline parsing
-- `events(input)` — full enter/exit/text events
-- `parseChunked(chunks)` — progressive completed blocks (async, Phase 6)
+Events, not AST, are the fundamental output. Three streaming modes:
+- `outlineEvents(input)`: block-only, no inline parsing
+- `events(input)`: full enter/exit/text events
+- `parseChunked(chunks)`: progressive completed blocks (async, Phase 6)
 
 ## Parser contracts
 
