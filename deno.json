@@ -16,6 +16,7 @@
       "mod.ts",
       "ast.ts",
       "events.ts",
+      "text_source.ts",
       "token.ts",
       "tokenizer.ts",
       "block_parser.ts",
