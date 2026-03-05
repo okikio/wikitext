@@ -74,14 +74,14 @@ Three base categories, mirroring unist:
 | `Wikilink` | Parent | (inline context) | `target: string` |
 | `ExternalLink` | Parent | (inline context) | `url: string` |
 | `ImageLink` | Parent | (inline context) | `target: string` |
-| `CategoryLink` | Parent | (inline context) | `target: string`, `sortKey?: string` |
+| `CategoryLink` | Parent | (inline context) | `target: string`, `sort_key?: string` |
 | `Template` | Parent | (inline context) | `name: string` |
 | `TemplateArgument` | Parent | Template | `name?: string` (named) or positional |
 | `Argument` | Parent | (inline context) | `name: string`, `default?: string` |
 | `ParserFunction` | Parent | (inline context) | `name: string` |
 | `MagicWord` | Void | (inline context) | `name: string` |
 | `BehaviorSwitch` | Void | (inline context) | `name: string` |
-| `HtmlTag` | Parent | (inline context) | `tagName: string`, `selfClosing: boolean`, `attributes?: Record<string, string>` |
+| `HtmlTag` | Parent | (inline context) | `tag_name: string`, `self_closing: boolean`, `attributes?: Record<string, string>` |
 | `HtmlEntity` | Literal | (inline context) | (none) |
 | `Text` | Literal | (any parent) | (none) |
 | `Nowiki` | Literal | (inline context) | (none) |
@@ -138,7 +138,7 @@ A horizontal rule (`----` or more dashes at line start).
 
 ```ts
 interface ThematicBreak {
-  type: "thematicBreak";
+  type: "thematic-break";
 }
 ```
 
@@ -166,7 +166,7 @@ interface List {
 }
 
 interface ListItem {
-  type: "listItem";
+  type: "list-item";
   marker: string;  // the raw marker characters, e.g. "**" or "#*"
   children: WikistNode[];
 }
@@ -178,17 +178,17 @@ Definition lists use `;` for terms and `:` for descriptions.
 
 ```ts
 interface DefinitionList {
-  type: "definitionList";
+  type: "definition-list";
   children: (DefinitionTerm | DefinitionDescription)[];
 }
 
 interface DefinitionTerm {
-  type: "definitionTerm";
+  type: "definition-term";
   children: WikistNode[];
 }
 
 interface DefinitionDescription {
-  type: "definitionDescription";
+  type: "definition-description";
   children: WikistNode[];
 }
 ```
@@ -206,18 +206,18 @@ interface Table {
 }
 
 interface TableCaption {
-  type: "tableCaption";
+  type: "table-caption";
   children: WikistNode[];
 }
 
 interface TableRow {
-  type: "tableRow";
+  type: "table-row";
   attributes?: string;
   children: TableCell[];
 }
 
 interface TableCell {
-  type: "tableCell";
+  type: "table-cell";
   header: boolean;  // true for ! cells, false for | cells
   attributes?: string;
   children: WikistNode[];
@@ -241,7 +241,7 @@ interface Italic {
 }
 
 interface BoldItalic {
-  type: "boldItalic";
+  type: "bold-italic";
   children: WikistNode[];
 }
 ```
@@ -274,7 +274,7 @@ External links: `[https://example.com text]` or bare URLs.
 
 ```ts
 interface ExternalLink {
-  type: "externalLink";
+  type: "external-link";
   url: string;
   children: WikistNode[];  // display text
 }
@@ -289,7 +289,7 @@ A leading colon (`[[:File:Foo.png]]`) produces a `Wikilink` instead of an
 
 ```ts
 interface ImageLink {
-  type: "imageLink";
+  type: "image-link";
   target: string;  // filename including namespace
   children: WikistNode[];  // options and caption parts
 }
@@ -305,9 +305,9 @@ category assignment.
 
 ```ts
 interface CategoryLink {
-  type: "categoryLink";
+  type: "category-link";
   target: string;
-  sortKey?: string;
+  sort_key?: string;
 }
 ```
 
@@ -327,7 +327,7 @@ interface Template {
 }
 
 interface TemplateArgument {
-  type: "templateArgument";
+  type: "template-argument";
   name?: string;  // undefined for positional args
   children: WikistNode[];  // argument value
 }
@@ -356,7 +356,7 @@ alone, without knowing MediaWiki configuration.
 
 ```ts
 interface ParserFunction {
-  type: "parserFunction";
+  type: "parser-function";
   name: string;  // e.g. "#if", "#switch", "#invoke"
   children: TemplateArgument[];
 }
@@ -376,7 +376,7 @@ node type exists for consumers that perform this reclassification.
 
 ```ts
 interface MagicWord {
-  type: "magicWord";
+  type: "magic-word";
   name: string;  // e.g. "PAGENAME", "CURRENTYEAR"
 }
 ```
@@ -388,7 +388,7 @@ Double-underscore switches: `__TOC__`, `__NOTOC__`, `__FORCETOC__`,
 
 ```ts
 interface BehaviorSwitch {
-  type: "behaviorSwitch";
+  type: "behavior-switch";
   name: string;  // e.g. "TOC", "NOTOC"
 }
 ```
@@ -400,9 +400,9 @@ HTML tags in wikitext. Covers both standard HTML and MediaWiki extension tags
 
 ```ts
 interface HtmlTag {
-  type: "htmlTag";
-  tagName: string;
-  selfClosing: boolean;
+  type: "html-tag";
+  tag_name: string;
+  self_closing: boolean;
   attributes?: Record<string, string>;
   children: WikistNode[];  // content between open and close tags
 }
@@ -414,7 +414,7 @@ HTML character entities: `&amp;`, `&#123;`, `&#x7b;`.
 
 ```ts
 interface HtmlEntity {
-  type: "htmlEntity";
+  type: "html-entity";
   value: string;  // the raw entity text including & and ;
 }
 ```

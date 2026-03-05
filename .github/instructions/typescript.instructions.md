@@ -46,15 +46,21 @@ applyTo: "**/*.ts,**/*.tsx"
 
     ```ts
     export const TOKEN_KIND = {
-    	TEXT: 'text',
-    	HEADING: 'heading',
+    	TEXT: 'TEXT',
+    	HEADING: 'HEADING',
     } as const;
 
     export type TokenKind = typeof TOKEN_KIND[keyof typeof TOKEN_KIND];
     ```
-- For string literal discriminants and object property keys, prefer
-  `kebab-case` or `snake_case` over `camelCase` when introducing new public
-  typing and serialized object shapes.
+  - Constant/enum keys and values can use UPPER_SNAKE_CASE, snake_case, kebab-case, and PascalCase (e.g.,
+    `TokenType.HEADING_MARKER` → `'HEADING_MARKER'`).
+- For AST node type discriminant strings (the `type`/`kind` field in interfaces/objects),
+  prefer `kebab-case` (e.g., `'thematic-break'`, `'list-item'`,
+  `'external-link'`). Single-word types stay lowercase (e.g., `'heading'`,
+  `'table'`).
+- For object and interface property keys in public interfaces, prefer `snake_case` over
+  `camelCase` (e.g., `node_type`, `start_offset`, `sort_key`, `tag_name`,
+  `self_closing`).
   - Keep existing public keys stable unless a migration is explicitly approved.
 - Prefer `Iterable` / `AsyncIterable` in public APIs over arrays unless there’s
   a clear reason (performance counts as a valid reason).
@@ -68,9 +74,9 @@ applyTo: "**/*.ts,**/*.tsx"
 | AST nodes      | `Wikist*`            | `WikistRoot`, `WikistNode`, `WikistParent`, `WikistLiteral` |
 | Concrete nodes | PascalCase noun      | `Heading`, `Template`, `Wikilink`, `TableCell`              |
 | Events         | `*Event`             | `WikitextEvent`, `EnterEvent`, `ExitEvent`, `TextEvent`     |
-| Tokens         | `Token`, `TokenType` | `Token`, `TokenType.HEADING_MARKER`                         |
-| Type guards    | `is*()`              | `isHeading()`, `isTemplate()`, `isParent()`                 |
-| Builders       | camelCase noun       | `heading(level, children)`, `text(value)`                   |
+| Tokens         | `Token`, `TokenType` | `Token`, `TokenType.HEADING_MARKER` (value: `'HEADING_MARKER'`)      |
+| Type guards    | `is*()`              | `isHeading()`, `isTemplate()`, `isParent()`                         |
+| Builders       | camelCase noun       | `heading(level, children)`, `text(value)`                           |
 
 ## Object copying
 

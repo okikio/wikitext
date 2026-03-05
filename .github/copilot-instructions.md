@@ -111,6 +111,12 @@ Names should be approachable and succinct, while still capturing:
 Naming conventions for this project:
 
 - AST node types: `WikistRoot`, `WikistNode`, `WikistParent`, `WikistLiteral`
+- AST type discriminants: kebab-case (`'thematic-break'`, `'list-item'`,
+  `'external-link'`); single-word stays lowercase (`'heading'`, `'table'`)
+- Event property keys: snake_case (`node_type`, `start_offset`, `end_offset`,
+  `token_type`)
+- Constants/enums: UPPER_SNAKE_CASE keys and values (`TokenType.HEADING_MARKER`
+  → `'HEADING_MARKER'`)
 - Events: `WikitextEvent`, `EnterEvent`, `ExitEvent`, `TextEvent`
 - Tokens: `Token`, `TokenType`
 - Parsers: `tokenize()`, `blockParse()`, `inlineParse()`

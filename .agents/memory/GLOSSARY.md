@@ -22,7 +22,7 @@
   optional `iterSlices`) that abstracts the backing text. Plain `string`
   satisfies it; rope trees, CRDTs, and append buffers can implement it too.
 - **Range-first events**: Event design where `text`/`token` events carry
-  `startOffset`/`endOffset` instead of a `value` string. Text is resolved
+  `start_offset`/`end_offset` instead of a `value` string. Text is resolved
   lazily via `slice(source, evt)`. Avoids per-event string allocation.
 - **Session**: Stateful wrapper (`createSession(source)`) around the
   stateless pipeline. Caches parse state, exposes streaming and incremental

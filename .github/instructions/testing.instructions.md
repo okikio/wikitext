@@ -107,8 +107,8 @@ fc.assert(
   fc.property(fc.string(), (s) => {
     const stack: string[] = [];
     for (const evt of events(s)) {
-      if (evt.type === "enter") stack.push(evt.nodeType);
-      if (evt.type === "exit") expect(stack.pop()).toBe(evt.nodeType);
+      if (evt.kind === "enter") stack.push(evt.node_type);
+      if (evt.kind === "exit") expect(stack.pop()).toBe(evt.node_type);
     }
     expect(stack).toEqual([]);
   }),

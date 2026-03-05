@@ -68,10 +68,10 @@ discipline already used by raw tokens.
 
 | Variant | Fields | Meaning |
 |---------|--------|---------|
-| `enter` | `nodeType`, `props`, `position` | Opens a node |
-| `exit`  | `nodeType`, `position` | Closes the matching node |
-| `text`  | `startOffset`, `endOffset`, `position` | Literal text range |
-| `token` | `tokenType`, `startOffset`, `endOffset`, `position` | Raw token range |
+| `enter` | `node_type`, `props`, `position` | Opens a node |
+| `exit`  | `node_type`, `position` | Closes the matching node |
+| `text`  | `start_offset`, `end_offset`, `position` | Literal text range |
+| `token` | `token_type`, `start_offset`, `end_offset`, `position` | Raw token range |
 | `error` | `message`, `position` | Recovery diagnostic event |
 
 Consumers that need the string value call `slice(source, event)`. This avoids

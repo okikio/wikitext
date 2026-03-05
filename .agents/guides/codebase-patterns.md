@@ -34,7 +34,7 @@ Three streaming modes, all event-well-formed (stack discipline):
 | Progressive | `parseChunked(chunks)` | Async block nodes | Streaming render |
 
 All event modes produce **range-first events**: text/token events carry
-`startOffset`/`endOffset` into the `TextSource` rather than an extracted
+`start_offset`/`end_offset` into the `TextSource` rather than an extracted
 `value` string. Consumers call `slice(source, evt)` to resolve text on demand.
 
 ## TextSource (`text_source.ts`)
