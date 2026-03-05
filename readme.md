@@ -52,12 +52,12 @@ const wikitext = stringify(tree);
 
 // Stream events without building a tree
 for (const evt of events('== Heading ==\n\nSome text.')) {
-  console.log(evt.type, evt.nodeType ?? evt.value);
+  console.log(evt.kind, evt.node_type ?? evt.value);
 }
 
 // Block-only events (cheapest structured path)
 for (const evt of outlineEvents(largeArticle)) {
-  if (evt.type === 'enter' && evt.nodeType === 'heading') {
+  if (evt.kind === 'enter' && evt.node_type === 'heading') {
     toc.push(evt);
   }
 }
