@@ -61,7 +61,7 @@ lol-html: events are more fundamental than trees. An event stream represents
 the same structural information as an AST but without requiring tree allocation
 upfront. Consumers choose how much structure to materialize.
 
-An event is one of four variants. Events are **range-first**: text and token
+An event is one of five variants. Events are **range-first**: text and token
 events carry offset ranges into the source, not allocated strings. A
 `slice(source, evt)` helper resolves the string on demand, matching the
 discipline already used by raw tokens.
@@ -72,6 +72,7 @@ discipline already used by raw tokens.
 | `exit`  | `nodeType`, `position` | Closes the matching node |
 | `text`  | `startOffset`, `endOffset`, `position` | Literal text range |
 | `token` | `tokenType`, `startOffset`, `endOffset`, `position` | Raw token range |
+| `error` | `message`, `position` | Recovery diagnostic event |
 
 Consumers that need the string value call `slice(source, event)`. This avoids
 repeated substring allocations during streaming and incremental reparses, and
@@ -263,7 +264,8 @@ content (CJK articles, diacritics, emoji).
 
 The parser never throws on any input. Malformed wikitext produces a valid
 wikist tree with error recovery. Recovery points optionally emit
-`{ type: "error", message, position }` events that consumers can log or ignore.
+`{ kind: "error", message, position, ...diagnosticMetadata }` events that
+consumers can log or ignore.
 
 ### 4. Determinism
 

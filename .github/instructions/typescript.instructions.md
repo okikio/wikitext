@@ -41,6 +41,17 @@ applyTo: "**/*.ts,**/*.tsx"
 ## Types + API design
 
 - Avoid `any`. Prefer generics, unions, discriminated unions, and narrowing.
+- Avoid `enum` in favor of `const`-based literals (`as const`) + union types.
+  - Prefer this pattern:
+
+    ```ts
+    export const TOKEN_KIND = {
+    	TEXT: 'text',
+    	HEADING: 'heading',
+    } as const;
+
+    export type TokenKind = typeof TOKEN_KIND[keyof typeof TOKEN_KIND];
+    ```
 - Prefer `Iterable` / `AsyncIterable` in public APIs over arrays unless there’s
   a clear reason (performance counts as a valid reason).
 - Prefer `Object.assign(...)` over object spread for object copying/merging.

@@ -122,7 +122,7 @@ Naming conventions for this project:
 Docs/comments should add nuance (and confidence), not compensate for unclear
 naming.
 
-### Documentation & comments (educational codebase)
+### Documentation, tsdocs & comments (educational codebase)
 
 - Default: explain _why_.
 - When the _what/how_ is non-obvious (regex, bitwise/binary math, tricky boolean
@@ -188,22 +188,22 @@ When making a behavioral change, touch all of these before closing the task:
 Targeted rules live under `.github/instructions/`. These are prescriptive:
 follow them whenever you work on a matching file.
 
-| File                                | Applies to                       |
-| ----------------------------------- | -------------------------------- |
-| `typescript.instructions.md`        | `**/*.ts`, `**/*.tsx`            |
-| `markdown-writing.instructions.md`  | `**/*.md`, `**/*.ts`, `**/*.tsx` |
-| `ascii-diagrams.instructions.md`    | `**/*.ts`, `**/*.md`             |
-| `testing.instructions.md`           | `**/*_test.ts`, `**/*.test.ts`   |
-| `benchmarking.instructions.md`      | `**/*_bench.ts`, `**/*bench*.ts` |
-| `changelog-commits.instructions.md` | `**` (all files)                 |
-| `pull-requests.instructions.md`     | `**` (all files)                 |
-| `code-review.instructions.md`       | `**` (all files)                 |
+| File                                             | Applies to                       |
+| ------------------------------------------------ | -------------------------------- |
+| `typescript.instructions.md`                     | `**/*.ts`, `**/*.tsx`            |
+| `docs-comments-markdown-writing.instructions.md` | `**/*.md`, `**/*.ts`, `**/*.tsx` |
+| `ascii-diagrams.instructions.md`                 | `**/*.ts`, `**/*.md`             |
+| `testing.instructions.md`                        | `**/*_test.ts`, `**/*.test.ts`   |
+| `benchmarking.instructions.md`                   | `**/*_bench.ts`, `**/*bench*.ts` |
+| `changelog-commits.instructions.md`              | `**` (all files)                 |
+| `pull-requests.instructions.md`                  | `**` (all files)                 |
+| `code-review.instructions.md`                    | `**` (all files)                 |
 
 ### Guides (situational reference, read on demand)
 
 Reference material lives under `.agents/guides/`. These are descriptive:
 read them when the task calls for it, not necessarily on every edit.
 
-| File                   | When to read                                                |
-| ---------------------- | ----------------------------------------------------------- |
+| File                   | When to read                                               |
+| ---------------------- | ---------------------------------------------------------- |
 | `codebase-patterns.md` | Before touching core modules: architecture, pipeline, perf |
