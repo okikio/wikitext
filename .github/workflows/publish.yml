@@ -1,0 +1,85 @@
+# Publishes to JSR when a GitHub Release is published.
+#
+# Flow:
+#   bump.yml  →  merge PR  →  release.yml creates draft  →
+#   you review & publish the draft  →  this workflow fires
+#
+# Authentication:
+#   Uses GitHub's OIDC token — no JSR secret needed. JSR exchanges the
+#   OIDC JWT for a short-lived publish token automatically, as long as
+#   the GitHub repo is linked in the JSR package settings.
+#
+#   Required JSR setup (one-time):
+#     jsr.io → @okikio/undent → Settings → GitHub Repository → link okikio/undent
+#
+# Safety:
+#   `deno publish` is idempotent — it exits cleanly if the version in
+#   deno.json is already published to JSR, so accidental re-runs are safe.
+name: Publish
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+
+permissions:
+  # id-token: write is required for JSR's OIDC publish flow.
+  # It mints a short-lived publish credential automatically — no secret needed.
+  id-token: write
+  contents: read
+
+jobs:
+  publish-jsr:
+    name: Publish to JSR
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: denoland/setup-deno@v2
+
+      - name: Cache Deno deps
+        uses: actions/cache@v5
+        with:
+          path: ~/.cache/deno
+          key: ${{ runner.os }}-deno-${{ hashFiles('deno.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-deno-
+
+      - name: Publish to JSR
+        run: deno publish
+
+  publish-npm:
+    name: Publish to npm
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: denoland/setup-deno@v2
+
+      - name: Cache Deno deps
+        uses: actions/cache@v5
+        with:
+          path: ~/.cache/deno
+          key: ${{ runner.os }}-deno-${{ hashFiles('deno.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-deno-
+
+      - name: Build npm package
+        # Compiles mod.ts → CJS + ESM, type-checks against Node types,
+        # and runs the test suite via Node.js before publishing.
+        run: deno task build:npm
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "25"
+          registry-url: "https://registry.npmjs.org"
+
+      - name: Publish to npm
+        # `npm publish` is idempotent when called with --ignore-scripts:
+        # it exits with a non-zero code for an already-published version,
+        # which we suppress with `|| true` so re-runs of the workflow are safe.
+        run: |
+          cd npm
+          npm publish --access public || echo "Version already published — skipping."
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

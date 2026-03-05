@@ -1,0 +1,37 @@
+{
+  "name": "@okikio/wikitext",
+  "version": "0.0.0",
+  "exports": "./mod.ts",
+  "tasks": {
+    "test": "deno test --trace-leaks --v8-flags=--expose-gc",
+    "bench": "deno bench --allow-env=NODE_DISABLE_COLORS --v8-flags=--expose-gc",
+    "forge": "deno run -A jsr:@roka/forge",
+    "build:npm": "deno run -A scripts/build_npm.ts"
+  },
+  "fmt": {
+    "proseWrap": "preserve"
+  },
+  "publish": {
+    "include": [
+      "mod.ts",
+      "ast.ts",
+      "events.ts",
+      "token.ts",
+      "tokenizer.ts",
+      "block_parser.ts",
+      "inline_parser.ts",
+      "parse.ts",
+      "tree_builder.ts",
+      "stringify.ts",
+      "filter.ts",
+      "changelog.md",
+      "license",
+      "readme.md"
+    ],
+    "exclude": [
+      "npm/",
+      "scripts/"
+    ]
+  },
+  "license": "MIT"
+}
