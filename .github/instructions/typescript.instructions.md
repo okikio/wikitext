@@ -52,6 +52,10 @@ applyTo: "**/*.ts,**/*.tsx"
 
     export type TokenKind = typeof TOKEN_KIND[keyof typeof TOKEN_KIND];
     ```
+- For string literal discriminants and object property keys, prefer
+  `kebab-case` or `snake_case` over `camelCase` when introducing new public
+  typing and serialized object shapes.
+  - Keep existing public keys stable unless a migration is explicitly approved.
 - Prefer `Iterable` / `AsyncIterable` in public APIs over arrays unless there’s
   a clear reason (performance counts as a valid reason).
 - Prefer `Object.assign(...)` over object spread for object copying/merging.
