@@ -1,67 +1,67 @@
 /**
- * Block-level parser that consumes a token stream and yields structural
- * events for headings, paragraphs, lists, tables, thematic breaks, and
- * preformatted blocks.
+ * Block-level parser that turns a token stream into structural events.
  *
- * The block parser is the second stage in the pipeline:
+ * The tokenizer only marks raw source pieces such as `==`, `*`, `{|`, and
+ * plain text. This file is the next step. It reads those tokens line by line
+ * and answers a more useful question: what kind of block does this line begin?
+ *
+ * In practical terms, this stage decides things like:
+ *
+ * - does this line start a heading?
+ * - is this the start of a bullet list or numbered list?
+ * - are we entering a table?
+ * - should this text become a paragraph?
+ *
+ * The output is still an event stream rather than a tree. That keeps it useful
+ * for streaming callers and lets later stages, especially the inline parser,
+ * enrich the structure without rebuilding everything from scratch.
  *
  * ```
- * TextSource → tokenize() → blockEvents() → [inline parser] → [consumers]
+ * TextSource -> tokenize() -> blockEvents() -> [inline parser] -> [consumers]
  * ```
  *
- * It reads tokens one at a time and dispatches on the first token of each
- * logical line to determine the block structure. The output is a flat stream
- * of {@linkcode WikitextEvent} values with well-formed enter/exit nesting.
- *
- * Line-oriented dispatch:
+ * The parser is line-oriented. That means the first meaningful token on a line
+ * usually decides what kind of block the line belongs to.
  *
  * ```
- * First token          Block type
- * ─────────────────    ──────────────────
- * HEADING_MARKER       heading (level = marker length, capped at 6)
- * BULLET               bullet list (nesting by marker count)
- * HASH                 ordered list (nesting by marker count)
- * SEMICOLON            definition list term
- * COLON                definition list description / indent
- * TABLE_OPEN           table
- * THEMATIC_BREAK       thematic break (void)
- * PREFORMATTED_MARKER  preformatted block
- * other                paragraph (absorbs until next block delimiter)
+ * first token on line   result
+ * -------------------   -------------------------
+ * HEADING_MARKER        heading
+ * BULLET                bullet list item
+ * HASH                  numbered list item
+ * SEMICOLON             definition-list term
+ * COLON                 definition-list description or indent
+ * TABLE_OPEN            table
+ * THEMATIC_BREAK        thematic break
+ * PREFORMATTED_MARKER   preformatted block
+ * anything else         paragraph
  * ```
  *
- * The parser never throws. Malformed input produces recovery events and
- * closes any open blocks at end of input or at block boundaries.
+ * One important limit to keep in mind is that this file is still only doing
+ * block structure. If a heading contains `[[Mars]]` or `'''bold'''`, this
+ * stage does not parse those inline details yet. It emits text ranges inside
+ * the heading and leaves inline meaning for the later inline parser.
  *
- * @example Parsing headings and paragraphs
+ * Like the rest of the pipeline, this parser never throws. If the input is
+ * messy, it emits recovery events when needed and still closes open blocks so
+ * the event stream stays usable.
+ *
+ * @example Parsing a heading followed by a paragraph
  * ```ts
- * import { tokenize } from './tokenizer.ts';
  * import { blockEvents } from './block_parser.ts';
+ * import { tokenize } from './tokenizer.ts';
  *
  * const source = '== Title ==\nSome text.';
  * const events = [...blockEvents(source, tokenize(source))];
- * // enter('heading', { level: 2 })
- * //   text(3, 8)  — "Title"
- * // exit('heading')
- * // enter('paragraph')
- * //   text(12, 22)  — "Some text."
- * // exit('paragraph')
  * ```
  *
- * @example Nested bullet list
+ * @example Parsing nested bullet lines
  * ```ts
- * import { tokenize } from './tokenizer.ts';
  * import { blockEvents } from './block_parser.ts';
+ * import { tokenize } from './tokenizer.ts';
  *
  * const source = '* A\n** B';
  * const events = [...blockEvents(source, tokenize(source))];
- * // enter('list', { ordered: false })
- * //   enter('list-item', { marker: '*' })
- * //     text(...)  — "A"
- * //   exit('list-item')
- * //   enter('list-item', { marker: '**' })
- * //     text(...)  — "B"
- * //   exit('list-item')
- * // exit('list')
  * ```
  *
  * @module
@@ -82,17 +82,17 @@ import {
 // Position helpers
 // ---------------------------------------------------------------------------
 
-/** Build a Point from offset + tracked line/column. */
+/** Build a source point from the current line, column, and offset. */
 function point(line: number, column: number, offset: number): Point {
   return { line, column, offset };
 }
 
-/** Build a Position spanning two points. */
+/** Build a source range from two points. */
 function pos(start: Point, end: Point): Position {
   return { start, end };
 }
 
-/** A zero-width position at the given point. */
+/** Build an empty range at one point. */
 function zeroPos(pt: Point): Position {
   return { start: pt, end: pt };
 }
@@ -101,8 +101,8 @@ function zeroPos(pt: Point): Position {
 // Line tracker
 // ---------------------------------------------------------------------------
 //
-// Tokens only carry offsets. We need line/column for event positions.
-// This tracker updates line/column as we consume tokens with newlines.
+// Tokens only store start and end offsets. Event positions also need line and
+// column, so this tracker keeps that extra running state as tokens are consumed.
 
 interface LineTracker {
   line: number;
@@ -110,12 +110,12 @@ interface LineTracker {
   line_offset: number;
 }
 
-/** Get the Point for a given offset, given the current line state. */
+/** Turn an offset into a full source point using the current line-tracking state. */
 function pointAt(tracker: LineTracker, offset: number): Point {
   return point(tracker.line, 1 + offset - tracker.line_offset, offset);
 }
 
-/** Advance the tracker past a newline token. */
+/** Move line tracking forward after consuming a newline token. */
 function advanceLine(tracker: LineTracker, newlineEnd: number): void {
   tracker.line++;
   tracker.line_offset = newlineEnd;
@@ -125,9 +125,9 @@ function advanceLine(tracker: LineTracker, newlineEnd: number): void {
 // Token buffer
 // ---------------------------------------------------------------------------
 //
-// The block parser needs to peek ahead (e.g., to see how many list markers
-// are stacked, or to check for heading close markers). This wraps the token
-// iterator with single-token lookahead and caches the current + next tokens.
+// The block parser sometimes needs to inspect the current token before it
+// decides which block parser to enter. This wrapper keeps the current token and
+// line-tracking state together so the parser can peek and consume cleanly.
 
 interface TokenBuffer {
   iter: Iterator<Token>;
@@ -146,7 +146,7 @@ function createBuffer(tokens: Iterable<Token>): TokenBuffer {
   };
 }
 
-/** Advance to the next token, updating line tracking for newlines. */
+/** Consume the current token and move to the next one, updating line tracking on newlines. */
 function advance(buf: TokenBuffer): void {
   if (buf.current && buf.current.type === TokenType.NEWLINE) {
     advanceLine(buf.tracker, buf.current.end);
@@ -155,12 +155,12 @@ function advance(buf: TokenBuffer): void {
   buf.current = next.done ? null : next.value;
 }
 
-/** Peek at the current token without consuming it. */
+/** Read the current token without consuming it. */
 function peek(buf: TokenBuffer): Token | null {
   return buf.current;
 }
 
-/** Consume and return the current token. */
+/** Return the current token and advance the buffer. */
 function consume(buf: TokenBuffer): Token | null {
   const tok = buf.current;
   if (tok) advance(buf);
@@ -181,7 +181,7 @@ function consume(buf: TokenBuffer): Token | null {
 // The block parser maintains a stack of open list levels. When a new line's
 // prefix diverges from the stack, we close excess levels and open new ones.
 
-/** Marker info for one nesting level of a list. */
+/** Information about one open list depth. */
 interface ListLevel {
   /** 'bullet', 'ordered', 'definition-term', or 'definition-description'. */
   kind: string;
