@@ -7,32 +7,68 @@
  * how much structure to materialize: a full tree, an HTML string, a filtered
  * subset, or direct callbacks — all from the same event sequence.
  *
- * ## Why events, not just an AST?
- *
  * An AST requires allocating every node upfront. For large articles (200 KB+),
  * this is expensive. An event stream is cheaper to produce and lets
  * consumers bail out early (e.g., "find the first heading and stop"). Events
  * compose well: you can filter, transform, or pipe them without building
  * intermediate trees.
  *
- * ## How events work
+ * ## Enter/exit pairs and stack discipline
  *
  * The event stream uses **enter/exit pairs** with stack discipline, similar
  * to SAX for XML. For the input `== Hello ==\nText`, the event stream
  * looks like:
  *
  * ```
- * enter('heading', { level: 2 })   ← open the heading node
- *   text(3, 8)                     ← "Hello" (offsets, not a string)
- * exit('heading')                  ← close the heading node
- * enter('paragraph')               ← open a paragraph
- *   text(12, 16)                   ← "Text"
- * exit('paragraph')                ← close the paragraph
+ * enter('heading', { level: 2 })   <- open the heading node
+ *   text(3, 8)                     <- "Hello" (offsets, not a string)
+ * exit('heading')                  <- close the heading node
+ * enter('paragraph')               <- open a paragraph
+ *   text(12, 16)                   <- "Text"
+ * exit('paragraph')                <- close the paragraph
  * ```
  *
  * The nesting is always well-formed: every `enter(X)` has a matching
  * `exit(X)`, and they nest like parentheses. This guarantee means consumers
  * can track depth with a simple counter or stack.
+ *
+ * When wikitext nests one element inside another (a link inside a heading,
+ * bold inside a template, etc.), the event stream reflects that nesting.
+ * This is the key property that lets consumers reconstruct a tree or
+ * produce nested HTML tags from a flat sequence.
+ *
+ * Consider a link inside a heading:
+ *
+ * ```
+ * Source: "== See [[Mars]] =="
+ *          0123456789...
+ * ```
+ *
+ * The parser walks through this in order:
+ *
+ * 1. It sees `==` at position 0 -- opens a heading.
+ * 2. It skips the space and sees ordinary text `"See "`.
+ * 3. It sees `[[` at position 7 -- opens a wikilink *inside* the heading.
+ * 4. It sees `"Mars"` as text inside the link.
+ * 5. It sees `]]` at position 15 -- closes the wikilink.
+ * 6. It sees `" "` then `==` -- closes the heading.
+ *
+ * The event stream looks like:
+ *
+ * ```
+ * enter('heading', { level: 2 })      depth 1
+ *   text(3, 7)                        "See "
+ *   enter('wikilink')                 depth 2
+ *     text(9, 13)                     "Mars"
+ *   exit('wikilink')                  back to depth 1
+ *   text(15, 16)                      " "
+ * exit('heading')                     back to depth 0
+ * ```
+ *
+ * The stack discipline is visible in the indentation. A consumer tracking
+ * depth would see: 0 -> 1 -> 2 -> 1 -> 0. The enter/exit pairs always
+ * nest properly -- you never see `exit('heading')` before
+ * `exit('wikilink')`.
  *
  * Text and token events carry **offset ranges** (start/end integers) into
  * the source text, not allocated strings. This range-first approach matches
@@ -79,6 +115,21 @@
  * evt.props;    // { level: 2 }
  * ```
  *
+ * @example Tracking depth with a counter
+ * ```ts
+ * import type { WikitextEvent } from './events.ts';
+ *
+ * function maxDepth(events: Iterable<WikitextEvent>): number {
+ *   let depth = 0;
+ *   let max = 0;
+ *   for (const evt of events) {
+ *     if (evt.kind === 'enter') { depth++; max = Math.max(max, depth); }
+ *     if (evt.kind === 'exit') { depth--; }
+ *   }
+ *   return max;
+ * }
+ * ```
+ *
  * @module
  */
 
@@ -98,7 +149,7 @@ export type DiagnosticSeverity = 'error' | 'warning';
 // ecosystem (remark, rehype, etc.), so wikist trees are compatible with
 // unist utilities like `unist-util-position`.
 //
-// All measurements use UTF-16 code units — the native string indexing of
+// All measurements use UTF-16 code units, the native string indexing of
 // JavaScript. This matches the Language Server Protocol (LSP), which also
 // uses UTF-16 positions. No conversion needed when integrating with editors
 // like VS Code.
@@ -106,7 +157,7 @@ export type DiagnosticSeverity = 'error' | 'warning';
 /**
  * A specific location in a source file.
  *
- * Think of it as a cursor position: which line, which column, and the
+ * A cursor position in the source: which line, which column, and the
  * absolute character offset from the start of the file.
  *
  * All fields use UTF-16 code unit measurements, matching JS string indexing
@@ -138,16 +189,28 @@ export interface Position {
 // The five event kinds form a discriminated union on the `kind` field.
 // Consumers switch on `evt.kind` for exhaustive handling:
 //
-//   enter  → a node is opening (carries type + properties)
-//   exit   → the most recently opened node of that type is closing
-//   text   → a range of literal text (offsets into the source)
-//   token  → a raw tokenizer token surfaced in the event stream
-//   error  → a recovery point (the parser never throws)
+//   enter  -> a node is opening (carries type + properties)
+//   exit   -> the most recently opened node of that type is closing
+//   text   -> a range of literal text (offsets into the source)
+//   token  -> a raw tokenizer token surfaced in the event stream
+//   error  -> a recovery point (the parser never throws)
 //
 // Enter/exit pairs always nest properly. If you see:
-//   enter('bold') → enter('italic') → exit('italic') → exit('bold')
+//   enter('bold') -> enter('italic') -> exit('italic') -> exit('bold')
 // the nesting is correct. You will never see exit('bold') before
-// exit('italic') — that would break stack discipline.
+// exit('italic') -- that would break stack discipline.
+//
+// Why not carry text strings directly? Because events are produced during
+// parsing when millions of characters are being scanned. Allocating a new
+// string for every text span would create GC pressure. Instead, text
+// events carry start_offset/end_offset pairs. The consumer calls
+// `slice(source, start, end)` only when it actually needs the string
+// content (e.g., to render HTML or build a node value).
+//
+// Error events deserve special attention: the parser never throws. If it
+// encounters malformed wikitext like an unclosed `{{template`, it recovers
+// by treating the `{{` as literal text and optionally emits an ErrorEvent.
+// This means consumers always get a complete event stream for any input.
 
 /**
  * Signals that a node of the given type is being opened.
