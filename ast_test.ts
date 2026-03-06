@@ -14,6 +14,7 @@
  *    structural invariants (e.g., "builders produce nodes of the correct
  *    type", "type guards accept what builders produce").
  */
+// deno-lint-ignore-file no-import-prefix no-unversioned-import
 import { describe, it } from 'jsr:@std/testing/bdd';
 import { expect } from 'jsr:@std/expect';
 import * as fc from 'npm:fast-check';
