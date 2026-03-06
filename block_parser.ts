@@ -1,0 +1,993 @@
+/**
+ * Block-level parser that consumes a token stream and yields structural
+ * events for headings, paragraphs, lists, tables, thematic breaks, and
+ * preformatted blocks.
+ *
+ * The block parser is the second stage in the pipeline:
+ *
+ * ```
+ * TextSource → tokenize() → blockEvents() → [inline parser] → [consumers]
+ * ```
+ *
+ * It reads tokens one at a time and dispatches on the first token of each
+ * logical line to determine the block structure. The output is a flat stream
+ * of {@linkcode WikitextEvent} values with well-formed enter/exit nesting.
+ *
+ * Line-oriented dispatch:
+ *
+ * ```
+ * First token          Block type
+ * ─────────────────    ──────────────────
+ * HEADING_MARKER       heading (level = marker length, capped at 6)
+ * BULLET               bullet list (nesting by marker count)
+ * HASH                 ordered list (nesting by marker count)
+ * SEMICOLON            definition list term
+ * COLON                definition list description / indent
+ * TABLE_OPEN           table
+ * THEMATIC_BREAK       thematic break (void)
+ * PREFORMATTED_MARKER  preformatted block
+ * other                paragraph (absorbs until next block delimiter)
+ * ```
+ *
+ * The parser never throws. Malformed input produces recovery events and
+ * closes any open blocks at end of input or at block boundaries.
+ *
+ * @example Parsing headings and paragraphs
+ * ```ts
+ * import { tokenize } from './tokenizer.ts';
+ * import { blockEvents } from './block_parser.ts';
+ *
+ * const source = '== Title ==\nSome text.';
+ * const events = [...blockEvents(source, tokenize(source))];
+ * // enter('heading', { level: 2 })
+ * //   text(3, 8)  — "Title"
+ * // exit('heading')
+ * // enter('paragraph')
+ * //   text(12, 22)  — "Some text."
+ * // exit('paragraph')
+ * ```
+ *
+ * @example Nested bullet list
+ * ```ts
+ * import { tokenize } from './tokenizer.ts';
+ * import { blockEvents } from './block_parser.ts';
+ *
+ * const source = '* A\n** B';
+ * const events = [...blockEvents(source, tokenize(source))];
+ * // enter('list', { ordered: false })
+ * //   enter('list-item', { marker: '*' })
+ * //     text(...)  — "A"
+ * //   exit('list-item')
+ * //   enter('list-item', { marker: '**' })
+ * //     text(...)  — "B"
+ * //   exit('list-item')
+ * // exit('list')
+ * ```
+ *
+ * @module
+ */
+
+import type { TextSource } from './text_source.ts';
+import type { Token } from './token.ts';
+import type { Position, Point, WikitextEvent } from './events.ts';
+import { TokenType } from './token.ts';
+import {
+  enterEvent,
+  exitEvent,
+  textEvent,
+  errorEvent,
+} from './events.ts';
+
+// ---------------------------------------------------------------------------
+// Position helpers
+// ---------------------------------------------------------------------------
+
+/** Build a Point from offset + tracked line/column. */
+function point(line: number, column: number, offset: number): Point {
+  return { line, column, offset };
+}
+
+/** Build a Position spanning two points. */
+function pos(start: Point, end: Point): Position {
+  return { start, end };
+}
+
+/** A zero-width position at the given point. */
+function zeroPos(pt: Point): Position {
+  return { start: pt, end: pt };
+}
+
+// ---------------------------------------------------------------------------
+// Line tracker
+// ---------------------------------------------------------------------------
+//
+// Tokens only carry offsets. We need line/column for event positions.
+// This tracker updates line/column as we consume tokens with newlines.
+
+interface LineTracker {
+  line: number;
+  /** Offset of the start of the current line. */
+  line_offset: number;
+}
+
+/** Get the Point for a given offset, given the current line state. */
+function pointAt(tracker: LineTracker, offset: number): Point {
+  return point(tracker.line, 1 + offset - tracker.line_offset, offset);
+}
+
+/** Advance the tracker past a newline token. */
+function advanceLine(tracker: LineTracker, newlineEnd: number): void {
+  tracker.line++;
+  tracker.line_offset = newlineEnd;
+}
+
+// ---------------------------------------------------------------------------
+// Token buffer
+// ---------------------------------------------------------------------------
+//
+// The block parser needs to peek ahead (e.g., to see how many list markers
+// are stacked, or to check for heading close markers). This wraps the token
+// iterator with single-token lookahead and caches the current + next tokens.
+
+interface TokenBuffer {
+  iter: Iterator<Token>;
+  current: Token | null;
+  /** Tracks line/column from newline tokens. */
+  tracker: LineTracker;
+}
+
+function createBuffer(tokens: Iterable<Token>): TokenBuffer {
+  const iter = tokens[Symbol.iterator]();
+  const first = iter.next();
+  return {
+    iter,
+    current: first.done ? null : first.value,
+    tracker: { line: 1, line_offset: 0 },
+  };
+}
+
+/** Advance to the next token, updating line tracking for newlines. */
+function advance(buf: TokenBuffer): void {
+  if (buf.current && buf.current.type === TokenType.NEWLINE) {
+    advanceLine(buf.tracker, buf.current.end);
+  }
+  const next = buf.iter.next();
+  buf.current = next.done ? null : next.value;
+}
+
+/** Peek at the current token without consuming it. */
+function peek(buf: TokenBuffer): Token | null {
+  return buf.current;
+}
+
+/** Consume and return the current token. */
+function consume(buf: TokenBuffer): Token | null {
+  const tok = buf.current;
+  if (tok) advance(buf);
+  return tok;
+}
+
+// ---------------------------------------------------------------------------
+// List stack management
+// ---------------------------------------------------------------------------
+//
+// Wikitext lists are line-oriented: each line's marker prefix determines
+// the nesting level and list type. For example:
+//
+//   *   → depth 1, bullet
+//   **  → depth 2, bullet
+//   *#  → depth 1 bullet, depth 2 ordered
+//
+// The block parser maintains a stack of open list levels. When a new line's
+// prefix diverges from the stack, we close excess levels and open new ones.
+
+/** Marker info for one nesting level of a list. */
+interface ListLevel {
+  /** 'bullet', 'ordered', 'definition-term', or 'definition-description'. */
+  kind: string;
+  /** Node type for the wrapping list: 'list' or 'definition-list'. */
+  list_type: string;
+  /** Whether the list is ordered (only for 'list'). */
+  ordered: boolean;
+}
+
+function markerToLevel(marker: string): ListLevel {
+  switch (marker) {
+    case '*': return { kind: 'bullet', list_type: 'list', ordered: false };
+    case '#': return { kind: 'ordered', list_type: 'list', ordered: true };
+    case ';': return { kind: 'definition-term', list_type: 'definition-list', ordered: false };
+    case ':': return { kind: 'definition-description', list_type: 'definition-list', ordered: false };
+    default: return { kind: 'bullet', list_type: 'list', ordered: false };
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Block parser generator
+// ---------------------------------------------------------------------------
+
+/**
+ * Consume a token stream and yield block-level events.
+ *
+ * Reads tokens produced by {@linkcode tokenize} and emits enter/exit pairs
+ * for headings, paragraphs, lists, definition lists, tables, thematic
+ * breaks, and preformatted blocks. Inline content is emitted as raw text
+ * events for a downstream inline parser to process.
+ *
+ * The generator never throws. Malformed or unexpected token sequences
+ * produce recovery error events and the parser continues.
+ *
+ * @param source - The text source backing the tokens (for offset resolution).
+ * @param tokens - Token iterable, typically from `tokenize(source)`.
+ */
+export function* blockEvents(
+  source: TextSource,
+  tokens: Iterable<Token>,
+): Generator<WikitextEvent> {
+  const buf = createBuffer(tokens);
+
+  // Wrap the root document in enter/exit.
+  const startPt = pointAt(buf.tracker, 0);
+  yield enterEvent('root', {}, zeroPos(startPt));
+
+  while (peek(buf) !== null) {
+    const tok = peek(buf)!;
+
+    // Skip newlines between blocks (blank lines).
+    if (tok.type === TokenType.NEWLINE) {
+      advance(buf);
+      continue;
+    }
+
+    // Skip EOF.
+    if (tok.type === TokenType.EOF) {
+      advance(buf);
+      continue;
+    }
+
+    // Dispatch on the first token of the line.
+    switch (tok.type) {
+      case TokenType.HEADING_MARKER:
+        yield* parseHeading(buf, source);
+        break;
+
+      case TokenType.BULLET:
+      case TokenType.HASH:
+      case TokenType.SEMICOLON:
+      case TokenType.COLON:
+        yield* parseList(buf, source);
+        break;
+
+      case TokenType.TABLE_OPEN:
+        yield* parseTable(buf, source);
+        break;
+
+      case TokenType.THEMATIC_BREAK:
+        yield* parseThematicBreak(buf);
+        break;
+
+      case TokenType.PREFORMATTED_MARKER:
+        yield* parsePreformatted(buf, source);
+        break;
+
+      default:
+        yield* parseParagraph(buf, source);
+        break;
+    }
+  }
+
+  const endPt = pointAt(buf.tracker, source.length);
+  yield exitEvent('root', zeroPos(endPt));
+}
+
+// ---------------------------------------------------------------------------
+// Heading parser
+// ---------------------------------------------------------------------------
+//
+// Wikitext headings: `== Title ==`
+// The opening `=` count sets the level (1-6). A closing `=` run on the
+// same line is optional. Content between them is inline text.
+
+function* parseHeading(
+  buf: TokenBuffer,
+  source: TextSource,
+): Generator<WikitextEvent> {
+  const marker = consume(buf)!;
+  const level = Math.min(6, Math.max(1, marker.end - marker.start)) as
+    1 | 2 | 3 | 4 | 5 | 6;
+
+  const startPt = pointAt(buf.tracker, marker.start);
+
+  // Collect inline content tokens until NEWLINE, HEADING_MARKER_CLOSE, or EOF.
+  // Track the last content token to find the heading's end position.
+  const contentTokens: Token[] = [];
+  let endOffset = marker.end;
+
+  while (peek(buf) !== null) {
+    const t = peek(buf)!;
+    if (t.type === TokenType.NEWLINE || t.type === TokenType.EOF) break;
+
+    // Skip leading whitespace after the heading marker.
+    if (contentTokens.length === 0 && t.type === TokenType.WHITESPACE) {
+      advance(buf);
+      continue;
+    }
+
+    if (t.type === TokenType.HEADING_MARKER_CLOSE) {
+      endOffset = t.end;
+      advance(buf);
+      // Skip trailing whitespace after closing marker.
+      while (peek(buf) !== null) {
+        const tw = peek(buf)!;
+        if (tw.type === TokenType.NEWLINE || tw.type === TokenType.EOF) break;
+        if (tw.type === TokenType.WHITESPACE) {
+          advance(buf);
+          continue;
+        }
+        // Unexpected tokens after close marker: absorb as trailing content.
+        break;
+      }
+      break;
+    }
+
+    contentTokens.push(t);
+    endOffset = t.end;
+    advance(buf);
+  }
+
+  // Trim trailing whitespace tokens from content (before the close marker).
+  while (
+    contentTokens.length > 0 &&
+    contentTokens[contentTokens.length - 1].type === TokenType.WHITESPACE
+  ) {
+    contentTokens.pop();
+  }
+
+  const endPt = pointAt(buf.tracker, endOffset);
+  const headingPos = pos(startPt, endPt);
+
+  yield enterEvent('heading', { level }, headingPos);
+
+  // Emit text events for the content tokens.
+  for (const ct of contentTokens) {
+    const ctStart = pointAt(buf.tracker, ct.start);
+    const ctEnd = pointAt(buf.tracker, ct.end);
+    yield textEvent(ct.start, ct.end, pos(ctStart, ctEnd));
+  }
+
+  yield exitEvent('heading', headingPos);
+}
+
+// ---------------------------------------------------------------------------
+// Paragraph parser
+// ---------------------------------------------------------------------------
+//
+// A paragraph is a sequence of lines that don't start with a block
+// delimiter. The paragraph ends at a blank line (two consecutive
+// newlines), a block-starting token, or EOF.
+
+/** The set of token types that start a new block (terminating a paragraph). */
+const BLOCK_START_TOKENS: ReadonlySet<string> = new Set([
+  TokenType.HEADING_MARKER,
+  TokenType.BULLET,
+  TokenType.HASH,
+  TokenType.SEMICOLON,
+  TokenType.COLON,
+  TokenType.TABLE_OPEN,
+  TokenType.TABLE_CLOSE,
+  TokenType.THEMATIC_BREAK,
+  TokenType.PREFORMATTED_MARKER,
+]);
+
+function* parseParagraph(
+  buf: TokenBuffer,
+  _source: TextSource,
+): Generator<WikitextEvent> {
+  const firstTok = peek(buf)!;
+  const startPt = pointAt(buf.tracker, firstTok.start);
+
+  const contentTokens: Token[] = [];
+  let endOffset = firstTok.start;
+  let sawNewline = false;
+
+  while (peek(buf) !== null) {
+    const t = peek(buf)!;
+
+    if (t.type === TokenType.EOF) break;
+
+    // A newline followed by a block-start token or another newline
+    // (blank line) ends the paragraph.
+    if (t.type === TokenType.NEWLINE) {
+      if (sawNewline) {
+        // Double newline (blank line) — end paragraph.
+        break;
+      }
+      sawNewline = true;
+      endOffset = t.end;
+      advance(buf);
+
+      // Check what follows the newline.
+      const next = peek(buf);
+      if (next === null) break;
+      if (next.type === TokenType.EOF) break;
+      if (next.type === TokenType.NEWLINE) break;
+      if (BLOCK_START_TOKENS.has(next.type)) break;
+
+      // The newline is part of the paragraph content (continuation line).
+      // We don't emit newline tokens as text — they're structural separators
+      // within the paragraph's inline content.
+      continue;
+    }
+
+    sawNewline = false;
+    contentTokens.push(t);
+    endOffset = t.end;
+    advance(buf);
+  }
+
+  // Trim trailing whitespace from content tokens.
+  while (
+    contentTokens.length > 0 &&
+    contentTokens[contentTokens.length - 1].type === TokenType.WHITESPACE
+  ) {
+    contentTokens.pop();
+  }
+
+  // Don't emit empty paragraphs.
+  if (contentTokens.length === 0) return;
+
+  const lastTok = contentTokens[contentTokens.length - 1];
+  const endPt = pointAt(buf.tracker, lastTok.end);
+  const paraPos = pos(startPt, endPt);
+
+  yield enterEvent('paragraph', {}, paraPos);
+
+  for (const ct of contentTokens) {
+    const ctStart = pointAt(buf.tracker, ct.start);
+    const ctEnd = pointAt(buf.tracker, ct.end);
+    yield textEvent(ct.start, ct.end, pos(ctStart, ctEnd));
+  }
+
+  yield exitEvent('paragraph', paraPos);
+}
+
+// ---------------------------------------------------------------------------
+// List parser
+// ---------------------------------------------------------------------------
+//
+// Wikitext lists are line-oriented. Each list line starts with one or more
+// marker characters (*#;:). The number and type of markers determines the
+// nesting structure.
+//
+// Example:
+//   * A       → list(ordered=false) > list-item(marker='*')
+//   ** B      → list(ordered=false) > list-item(marker='*') > list(ordered=false) > list-item(marker='**')
+//   *# C      → list(ordered=false) > list-item(marker='*') > list(ordered=true) > list-item(marker='*#')
+//
+// The parser processes all consecutive list lines as one group, managing
+// a stack of open list/list-item nodes.
+
+function* parseList(
+  buf: TokenBuffer,
+  source: TextSource,
+): Generator<WikitextEvent> {
+  // The open stack tracks which lists and items are currently open.
+  // Each entry is { level: ListLevel, had_item: boolean }.
+  const openStack: { level: ListLevel; marker_char: string }[] = [];
+  let firstStart: Point | null = null;
+  let lastEnd: Point | null = null;
+
+  // Process consecutive list lines.
+  while (peek(buf) !== null) {
+    const t = peek(buf)!;
+
+    // Only list markers start a list line.
+    if (
+      t.type !== TokenType.BULLET &&
+      t.type !== TokenType.HASH &&
+      t.type !== TokenType.SEMICOLON &&
+      t.type !== TokenType.COLON
+    ) {
+      break;
+    }
+
+    // Collect marker characters for this line.
+    const markers: string[] = [];
+    let markersEndOffset = t.start;
+
+    while (peek(buf) !== null) {
+      const m = peek(buf)!;
+      if (
+        m.type !== TokenType.BULLET &&
+        m.type !== TokenType.HASH &&
+        m.type !== TokenType.SEMICOLON &&
+        m.type !== TokenType.COLON
+      ) {
+        break;
+      }
+      const char = tokenToMarkerChar(m.type);
+      markers.push(char);
+      markersEndOffset = m.end;
+      advance(buf);
+    }
+
+    const lineStartPt = pointAt(buf.tracker, markers.length > 0
+      ? markersEndOffset - markers.length
+      : markersEndOffset);
+
+    if (firstStart === null) firstStart = lineStartPt;
+
+    const depth = markers.length;
+
+    // Close levels deeper than the current line's depth.
+    yield* closeLevels(buf, openStack, depth);
+
+    // Open new levels or adjust existing levels.
+    for (let i = openStack.length; i < depth; i++) {
+      const markerChar = markers[i];
+      const lvl = markerToLevel(markerChar);
+      const lvlPt = pointAt(buf.tracker, markersEndOffset);
+      const lvlPos = zeroPos(lvlPt);
+
+      // Open the wrapping list node.
+      if (lvl.list_type === 'list') {
+        yield enterEvent('list', { ordered: lvl.ordered }, lvlPos);
+      } else {
+        yield enterEvent('definition-list', {}, lvlPos);
+      }
+
+      openStack.push({ level: lvl, marker_char: markerChar });
+    }
+
+    // Determine the item node type.
+    const lastMarker = markers[markers.length - 1];
+    const lastLevel = markerToLevel(lastMarker);
+    const fullMarker = markers.join('');
+
+    const itemPt = pointAt(buf.tracker, markersEndOffset);
+
+    // Open the list item.
+    if (lastLevel.kind === 'definition-term') {
+      yield enterEvent('definition-term', {}, zeroPos(itemPt));
+    } else if (lastLevel.kind === 'definition-description') {
+      yield enterEvent('definition-description', {}, zeroPos(itemPt));
+    } else {
+      yield enterEvent('list-item', { marker: fullMarker }, zeroPos(itemPt));
+    }
+
+    // Skip whitespace after markers.
+    while (peek(buf) !== null && peek(buf)!.type === TokenType.WHITESPACE) {
+      advance(buf);
+    }
+
+    // Collect inline content until newline or EOF.
+    const contentTokens: Token[] = [];
+    let lineEndOffset = markersEndOffset;
+
+    while (peek(buf) !== null) {
+      const ct = peek(buf)!;
+      if (ct.type === TokenType.NEWLINE || ct.type === TokenType.EOF) break;
+      contentTokens.push(ct);
+      lineEndOffset = ct.end;
+      advance(buf);
+    }
+
+    // Emit text events for line content.
+    for (const ct of contentTokens) {
+      const ctStart = pointAt(buf.tracker, ct.start);
+      const ctEnd = pointAt(buf.tracker, ct.end);
+      yield textEvent(ct.start, ct.end, pos(ctStart, ctEnd));
+    }
+
+    const itemEndPt = pointAt(buf.tracker, lineEndOffset);
+    lastEnd = itemEndPt;
+
+    // Close the list item.
+    if (lastLevel.kind === 'definition-term') {
+      yield exitEvent('definition-term', zeroPos(itemEndPt));
+    } else if (lastLevel.kind === 'definition-description') {
+      yield exitEvent('definition-description', zeroPos(itemEndPt));
+    } else {
+      yield exitEvent('list-item', zeroPos(itemEndPt));
+    }
+
+    // Consume the newline if present.
+    if (peek(buf) !== null && peek(buf)!.type === TokenType.NEWLINE) {
+      advance(buf);
+    }
+  }
+
+  // Close all remaining open levels.
+  yield* closeLevels(buf, openStack, 0);
+}
+
+/** Close list levels from the stack down to `targetDepth`. */
+function* closeLevels(
+  buf: TokenBuffer,
+  stack: { level: ListLevel; marker_char: string }[],
+  targetDepth: number,
+): Generator<WikitextEvent> {
+  while (stack.length > targetDepth) {
+    const entry = stack.pop()!;
+    const closePt = peek(buf)
+      ? pointAt(buf.tracker, peek(buf)!.start)
+      : pointAt(buf.tracker, 0);
+    const closePos = zeroPos(closePt);
+
+    // Close the wrapping list.
+    if (entry.level.list_type === 'list') {
+      yield exitEvent('list', closePos);
+    } else {
+      yield exitEvent('definition-list', closePos);
+    }
+  }
+}
+
+function tokenToMarkerChar(type: TokenType): string {
+  switch (type) {
+    case TokenType.BULLET: return '*';
+    case TokenType.HASH: return '#';
+    case TokenType.SEMICOLON: return ';';
+    case TokenType.COLON: return ':';
+    default: return '*';
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Table parser
+// ---------------------------------------------------------------------------
+//
+// Wikitext tables:
+//   {| attributes    → table open
+//   |+ caption       → table caption
+//   |-  attributes   → row separator
+//   | cell           → data cell
+//   || cell          → inline data cell separator
+//   ! cell           → header cell
+//   !! cell          → inline header cell separator
+//   |}               → table close
+//
+// Rows are implicit: the first cell after `{|` or `|+` starts an
+// implicit row. `|-` explicitly starts a new row.
+
+function* parseTable(
+  buf: TokenBuffer,
+  source: TextSource,
+): Generator<WikitextEvent> {
+  const openTok = consume(buf)!; // TABLE_OPEN
+  const startPt = pointAt(buf.tracker, openTok.start);
+
+  // Collect attributes after {| on the same line.
+  const attrTokens: Token[] = [];
+  while (peek(buf) !== null) {
+    const t = peek(buf)!;
+    if (t.type === TokenType.NEWLINE || t.type === TokenType.EOF) break;
+    attrTokens.push(t);
+    advance(buf);
+  }
+  const attributes = attrTokens.length > 0
+    ? joinTokenText(source, attrTokens).trim()
+    : undefined;
+
+  yield enterEvent('table', attributes !== undefined ? { attributes } : {}, zeroPos(startPt));
+
+  // Consume trailing newline.
+  if (peek(buf) !== null && peek(buf)!.type === TokenType.NEWLINE) {
+    advance(buf);
+  }
+
+  let rowOpen = false;
+  let cellOpen = false;
+
+  // Process table body line by line until TABLE_CLOSE or EOF.
+  while (peek(buf) !== null) {
+    const t = peek(buf)!;
+
+    if (t.type === TokenType.EOF) break;
+
+    // Table close: |}
+    if (t.type === TokenType.TABLE_CLOSE) {
+      if (cellOpen) {
+        yield* closeCell(buf);
+        cellOpen = false;
+      }
+      if (rowOpen) {
+        yield* closeRow(buf);
+        rowOpen = false;
+      }
+      const closePt = pointAt(buf.tracker, t.end);
+      advance(buf);
+      yield exitEvent('table', zeroPos(closePt));
+      // Consume trailing newline.
+      if (peek(buf) !== null && peek(buf)!.type === TokenType.NEWLINE) {
+        advance(buf);
+      }
+      return;
+    }
+
+    // Skip blank lines inside table.
+    if (t.type === TokenType.NEWLINE) {
+      advance(buf);
+      continue;
+    }
+
+    // Table row separator: |-
+    if (t.type === TokenType.TABLE_ROW) {
+      if (cellOpen) {
+        yield* closeCell(buf);
+        cellOpen = false;
+      }
+      if (rowOpen) {
+        yield* closeRow(buf);
+        rowOpen = false;
+      }
+      advance(buf);
+      const rowPt = pointAt(buf.tracker, t.start);
+
+      // Row attributes on the same line.
+      const rowAttrTokens: Token[] = [];
+      while (peek(buf) !== null) {
+        const rt = peek(buf)!;
+        if (rt.type === TokenType.NEWLINE || rt.type === TokenType.EOF) break;
+        rowAttrTokens.push(rt);
+        advance(buf);
+      }
+      const rowAttrs = rowAttrTokens.length > 0
+        ? joinTokenText(source, rowAttrTokens).trim()
+        : undefined;
+
+      yield enterEvent('table-row',
+        rowAttrs !== undefined ? { attributes: rowAttrs } : {},
+        zeroPos(rowPt));
+      rowOpen = true;
+
+      // Consume newline.
+      if (peek(buf) !== null && peek(buf)!.type === TokenType.NEWLINE) {
+        advance(buf);
+      }
+      continue;
+    }
+
+    // Table caption: |+
+    if (t.type === TokenType.TABLE_CAPTION) {
+      if (cellOpen) {
+        yield* closeCell(buf);
+        cellOpen = false;
+      }
+      advance(buf);
+      const capPt = pointAt(buf.tracker, t.start);
+
+      yield enterEvent('table-caption', {}, zeroPos(capPt));
+
+      // Caption content until newline or EOF.
+      yield* emitLineContent(buf);
+
+      const capEndPt = peek(buf)
+        ? pointAt(buf.tracker, peek(buf)!.start)
+        : pointAt(buf.tracker, source.length);
+      yield exitEvent('table-caption', zeroPos(capEndPt));
+
+      // Consume newline.
+      if (peek(buf) !== null && peek(buf)!.type === TokenType.NEWLINE) {
+        advance(buf);
+      }
+      continue;
+    }
+
+    // Header cell: ! at line start
+    if (t.type === TokenType.TABLE_HEADER_CELL) {
+      if (cellOpen) {
+        yield* closeCell(buf);
+        cellOpen = false;
+      }
+      if (!rowOpen) {
+        const rowPt = pointAt(buf.tracker, t.start);
+        yield enterEvent('table-row', {}, zeroPos(rowPt));
+        rowOpen = true;
+      }
+      advance(buf);
+      yield* parseTableCells(buf, source, true);
+      cellOpen = false; // parseTableCells handles open/close
+      // Consume newline.
+      if (peek(buf) !== null && peek(buf)!.type === TokenType.NEWLINE) {
+        advance(buf);
+      }
+      continue;
+    }
+
+    // Data cell: | at line start
+    if (t.type === TokenType.PIPE) {
+      if (cellOpen) {
+        yield* closeCell(buf);
+        cellOpen = false;
+      }
+      if (!rowOpen) {
+        const rowPt = pointAt(buf.tracker, t.start);
+        yield enterEvent('table-row', {}, zeroPos(rowPt));
+        rowOpen = true;
+      }
+      advance(buf);
+      yield* parseTableCells(buf, source, false);
+      cellOpen = false;
+      // Consume newline.
+      if (peek(buf) !== null && peek(buf)!.type === TokenType.NEWLINE) {
+        advance(buf);
+      }
+      continue;
+    }
+
+    // Anything else inside the table: treat as continuation content.
+    // This handles malformed table content gracefully.
+    advance(buf);
+  }
+
+  // End of input: close any open structures.
+  if (cellOpen) {
+    yield* closeCell(buf);
+  }
+  if (rowOpen) {
+    yield* closeRow(buf);
+  }
+  const endPt = pointAt(buf.tracker, source.length);
+  yield errorEvent('Unclosed table at end of input', zeroPos(endPt), {
+    severity: 'warning',
+    code: 'UNCLOSED_TABLE',
+    recoverable: true,
+    source: 'block',
+  });
+  yield exitEvent('table', zeroPos(endPt));
+}
+
+/** Parse cells on one line, handling `||` and `!!` inline separators. */
+function* parseTableCells(
+  buf: TokenBuffer,
+  source: TextSource,
+  header: boolean,
+): Generator<WikitextEvent> {
+  // Parse the first cell and any inline-separated cells on this line.
+  const separator = header ? TokenType.DOUBLE_BANG : TokenType.DOUBLE_PIPE;
+
+  while (true) {
+    const cellPt = peek(buf)
+      ? pointAt(buf.tracker, peek(buf)!.start)
+      : pointAt(buf.tracker, source.length);
+
+    yield enterEvent('table-cell', { header }, zeroPos(cellPt));
+
+    // Skip leading whitespace.
+    while (peek(buf) !== null && peek(buf)!.type === TokenType.WHITESPACE) {
+      advance(buf);
+    }
+
+    // Collect cell content until separator, newline, or EOF.
+    const contentTokens: Token[] = [];
+    let hitSeparator = false;
+
+    while (peek(buf) !== null) {
+      const ct = peek(buf)!;
+      if (ct.type === TokenType.NEWLINE || ct.type === TokenType.EOF) break;
+      if (ct.type === separator) {
+        hitSeparator = true;
+        advance(buf);
+        break;
+      }
+      // Also handle `!!` as separator in header context when seeing DOUBLE_BANG
+      // even from a data cell start (mixed usage).
+      if (header && ct.type === TokenType.DOUBLE_BANG) {
+        hitSeparator = true;
+        advance(buf);
+        break;
+      }
+      contentTokens.push(ct);
+      advance(buf);
+    }
+
+    // Emit text for the cell content.
+    for (const ct of contentTokens) {
+      const ctStart = pointAt(buf.tracker, ct.start);
+      const ctEnd = pointAt(buf.tracker, ct.end);
+      yield textEvent(ct.start, ct.end, pos(ctStart, ctEnd));
+    }
+
+    const cellEndPt = contentTokens.length > 0
+      ? pointAt(buf.tracker, contentTokens[contentTokens.length - 1].end)
+      : cellPt;
+    yield exitEvent('table-cell', zeroPos(cellEndPt));
+
+    if (!hitSeparator) break;
+  }
+}
+
+function* closeCell(buf: TokenBuffer): Generator<WikitextEvent> {
+  const pt = peek(buf)
+    ? pointAt(buf.tracker, peek(buf)!.start)
+    : pointAt(buf.tracker, 0);
+  yield exitEvent('table-cell', zeroPos(pt));
+}
+
+function* closeRow(buf: TokenBuffer): Generator<WikitextEvent> {
+  const pt = peek(buf)
+    ? pointAt(buf.tracker, peek(buf)!.start)
+    : pointAt(buf.tracker, 0);
+  yield exitEvent('table-row', zeroPos(pt));
+}
+
+/** Emit text events for tokens until newline or EOF. */
+function* emitLineContent(
+  buf: TokenBuffer,
+): Generator<WikitextEvent> {
+  while (peek(buf) !== null) {
+    const t = peek(buf)!;
+    if (t.type === TokenType.NEWLINE || t.type === TokenType.EOF) break;
+    const tStart = pointAt(buf.tracker, t.start);
+    const tEnd = pointAt(buf.tracker, t.end);
+    yield textEvent(t.start, t.end, pos(tStart, tEnd));
+    advance(buf);
+  }
+}
+
+/** Concatenate text of tokens by slicing from the source. */
+function joinTokenText(source: TextSource, tokens: Token[]): string {
+  if (tokens.length === 0) return '';
+  const start = tokens[0].start;
+  const end = tokens[tokens.length - 1].end;
+  return source.slice(start, end);
+}
+
+// ---------------------------------------------------------------------------
+// Thematic break parser
+// ---------------------------------------------------------------------------
+
+function* parseThematicBreak(
+  buf: TokenBuffer,
+): Generator<WikitextEvent> {
+  const tok = consume(buf)!;
+  const startPt = pointAt(buf.tracker, tok.start);
+  const endPt = pointAt(buf.tracker, tok.end);
+  const breakPos = pos(startPt, endPt);
+
+  yield enterEvent('thematic-break', {}, breakPos);
+  yield exitEvent('thematic-break', breakPos);
+}
+
+// ---------------------------------------------------------------------------
+// Preformatted block parser
+// ---------------------------------------------------------------------------
+//
+// Lines starting with a space are preformatted (rendered as <pre>).
+// Consecutive preformatted lines form one preformatted block.
+
+function* parsePreformatted(
+  buf: TokenBuffer,
+  source: TextSource,
+): Generator<WikitextEvent> {
+  const firstTok = peek(buf)!;
+  const startPt = pointAt(buf.tracker, firstTok.start);
+
+  yield enterEvent('preformatted', {}, zeroPos(startPt));
+
+  // Process consecutive preformatted lines.
+  while (peek(buf) !== null && peek(buf)!.type === TokenType.PREFORMATTED_MARKER) {
+    // Skip the preformatted marker (leading space).
+    advance(buf);
+
+    // Emit content of this line.
+    while (peek(buf) !== null) {
+      const t = peek(buf)!;
+      if (t.type === TokenType.NEWLINE || t.type === TokenType.EOF) break;
+      const tStart = pointAt(buf.tracker, t.start);
+      const tEnd = pointAt(buf.tracker, t.end);
+      yield textEvent(t.start, t.end, pos(tStart, tEnd));
+      advance(buf);
+    }
+
+    // Consume newline.
+    if (peek(buf) !== null && peek(buf)!.type === TokenType.NEWLINE) {
+      advance(buf);
+    }
+  }
+
+  const endPt = peek(buf)
+    ? pointAt(buf.tracker, peek(buf)!.start)
+    : pointAt(buf.tracker, source.length);
+  yield exitEvent('preformatted', zeroPos(endPt));
+}
