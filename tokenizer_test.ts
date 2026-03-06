@@ -8,6 +8,7 @@
  *
  * @module
  */
+// deno-lint-ignore-file no-import-prefix no-unversioned-import
 
 import { describe, it } from 'jsr:@std/testing/bdd';
 import { expect } from 'jsr:@std/expect';
@@ -554,9 +555,32 @@ describe('behavior switches', () => {
     expect(typeAt(t, 0)).toBe(TokenType.BEHAVIOR_SWITCH);
   });
 
-  it('__UNKNOWN__ is TEXT', () => {
+  it('__UNKNOWN__ is BEHAVIOR_SWITCH (structural pattern, not word-list gated)', () => {
     const t = tokens('__UNKNOWN__');
-    // Not in the recognized set, emits '__' as TEXT, then rest
+    expect(typeAt(t, 0)).toBe(TokenType.BEHAVIOR_SWITCH);
+    expect(t[0]).toEqual({ type: TokenType.BEHAVIOR_SWITCH, start: 0, end: 11 });
+  });
+
+  it('__CUSTOMEXT__ from an extension is BEHAVIOR_SWITCH', () => {
+    const t = tokens('__CUSTOMEXT__');
+    expect(typeAt(t, 0)).toBe(TokenType.BEHAVIOR_SWITCH);
+  });
+
+  it('__lowercaseword__ is not BEHAVIOR_SWITCH (letters must be ASCII letter)', () => {
+    // isAsciiLetter covers a-z too, so lowercase also matches the pattern
+    const t = tokens('__lowercaseword__');
+    expect(typeAt(t, 0)).toBe(TokenType.BEHAVIOR_SWITCH);
+  });
+
+  it('__ with no word (__) is TEXT', () => {
+    const t = tokens('____');
+    // Two consecutive __ pairs with no letters between
+    const switches = t.filter((tok) => tok.type === TokenType.BEHAVIOR_SWITCH);
+    expect(switches).toHaveLength(0);
+  });
+
+  it('__ with digits __123__ is TEXT (digits are not letters)', () => {
+    const t = tokens('__123__');
     const switches = t.filter((tok) => tok.type === TokenType.BEHAVIOR_SWITCH);
     expect(switches).toHaveLength(0);
   });
@@ -565,6 +589,20 @@ describe('behavior switches', () => {
     const t = tokens('_word_');
     const switches = t.filter((tok) => tok.type === TokenType.BEHAVIOR_SWITCH);
     expect(switches).toHaveLength(0);
+  });
+
+  it('unclosed __WORD is TEXT', () => {
+    const t = tokens('__WORD');
+    const switches = t.filter((tok) => tok.type === TokenType.BEHAVIOR_SWITCH);
+    expect(switches).toHaveLength(0);
+  });
+
+  it('behavior switch in mid-line context', () => {
+    const t = tokens('text __TOC__ more');
+    const switches = t.filter((tok) => tok.type === TokenType.BEHAVIOR_SWITCH);
+    expect(switches).toHaveLength(1);
+    expect(switches[0].start).toBe(5);
+    expect(switches[0].end).toBe(12);
   });
 });
 
@@ -675,9 +713,11 @@ describe('edge cases', () => {
 
   it('single / is TEXT', () => {
     const t = tokens('/');
-    // '/' is a delimiter char but doesn't match '/>' 
+    // '/' is a delimiter char but only matters for '/>' inside tags
+    expect(typeAt(t, 0)).toBe(TokenType.TEXT);
+
     const t2 = tokens('a/b');
-    // Should have text on both sides of the slash
+    // Should have text covering the slash
     const textTokens = t2.filter((tok) => tok.type === TokenType.TEXT);
     expect(textTokens.length).toBeGreaterThanOrEqual(1);
   });
@@ -689,6 +729,218 @@ describe('edge cases', () => {
     expect(t).toHaveLength(2);
     expect(t[0].type).toBe(TokenType.TEXT);
     expect(t[0].end - t[0].start).toBe(100_000);
+  });
+
+  it('tab at line start is WHITESPACE, not PREFORMATTED_MARKER', () => {
+    const t = tokens('\tHello');
+    // Only a literal space at column 0 is a preformatted marker;
+    // tab is generic whitespace.
+    expect(typeAt(t, 0)).toBe(TokenType.WHITESPACE);
+  });
+
+  it('self-closing <br/> without space', () => {
+    const t = tokens('<br/>');
+    expect(typeAt(t, 0)).toBe(TokenType.TAG_OPEN);
+    expect(t.some((tok) => tok.type === TokenType.SELF_CLOSING_TAG_END))
+      .toBe(true);
+  });
+
+  it('empty entity &#; is TEXT', () => {
+    const t = tokens('&#;');
+    // Not a valid entity pattern -- ampersand is TEXT
+    expect(typeAt(t, 0)).toBe(TokenType.TEXT);
+  });
+
+  it('CRLF at end of input', () => {
+    const t = tokens('hello\r\n');
+    expect(t.some((tok) => tok.type === TokenType.NEWLINE)).toBe(true);
+    expect(t[t.length - 1].type).toBe(TokenType.EOF);
+    // Token tiling: every code unit is covered
+    for (let i = 1; i < t.length; i++) {
+      expect(t[i].start).toBe(t[i - 1].end);
+    }
+  });
+
+  it('< followed by digit is TEXT', () => {
+    const t = tokens('<3 heart');
+    // '<' + digit is not a valid tag opener
+    expect(typeAt(t, 0)).toBe(TokenType.TEXT);
+  });
+
+  it('& alone at end of input is TEXT', () => {
+    const t = tokens('foo &');
+    const ampToken = t.find((tok) =>
+      tok.type === TokenType.TEXT && tok.start >= 4
+    );
+    expect(ampToken).toBeDefined();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Stress tests: adversarial and performance-sensitive patterns
+// ---------------------------------------------------------------------------
+
+describe('stress tests', () => {
+  it('100K of plain prose produces minimal tokens', () => {
+    const prose = 'The quick brown fox jumps over the lazy dog. '.repeat(2222);
+    const t = tokens(prose);
+    // Mostly TEXT + WHITESPACE tokens, ending with EOF
+    const last = t[t.length - 1];
+    expect(last.type).toBe(TokenType.EOF);
+    expect(last.start).toBe(prose.length);
+    // Verify tiling
+    for (let idx = 1; idx < t.length; idx++) {
+      expect(t[idx].start).toBe(t[idx - 1].end);
+    }
+  });
+
+  it('10K of CJK/emoji (non-ASCII fast path)', () => {
+    const cjk = '\u4E16\u754C\u3053\u3093\u306B\u3061\u306F'.repeat(1428);
+    const t = tokens(cjk);
+    // Entire input should collapse into a single TEXT token
+    expect(t).toHaveLength(2); // TEXT + EOF
+    expect(t[0].type).toBe(TokenType.TEXT);
+    expect(t[0].end).toBe(cjk.length);
+  });
+
+  it('thousands of __ pairs (pathological underscore input)', () => {
+    // 5000 pairs of __ with no letters between => all TEXT
+    const input = '__'.repeat(5000);
+    const t = tokens(input);
+    const last = t[t.length - 1];
+    expect(last.type).toBe(TokenType.EOF);
+    expect(last.start).toBe(input.length);
+    // No behavior switches (no letters between the underscores)
+    const switches = t.filter((tok) => tok.type === TokenType.BEHAVIOR_SWITCH);
+    expect(switches).toHaveLength(0);
+    // Tiling
+    for (let idx = 1; idx < t.length; idx++) {
+      expect(t[idx].start).toBe(t[idx - 1].end);
+    }
+  });
+
+  it('thousands of behavior switch patterns', () => {
+    const input = '__SWITCH__\n'.repeat(3000);
+    const t = tokens(input);
+    const switches = t.filter((tok) => tok.type === TokenType.BEHAVIOR_SWITCH);
+    expect(switches).toHaveLength(3000);
+    const last = t[t.length - 1];
+    expect(last.type).toBe(TokenType.EOF);
+  });
+
+  it('deeply nested braces', () => {
+    // {{{ repeated 500 times, then }}} repeated 500 times
+    const input = '{{{'.repeat(500) + '}}'.repeat(500) + '}'.repeat(500);
+    const t = tokens(input);
+    const last = t[t.length - 1];
+    expect(last.type).toBe(TokenType.EOF);
+    expect(last.start).toBe(input.length);
+    for (let idx = 1; idx < t.length; idx++) {
+      expect(t[idx].start).toBe(t[idx - 1].end);
+    }
+  });
+
+  it('deeply nested brackets', () => {
+    const input = '[['.repeat(500) + 'text' + ']]'.repeat(500);
+    const t = tokens(input);
+    const opens = t.filter((tok) => tok.type === TokenType.LINK_OPEN);
+    const closes = t.filter((tok) => tok.type === TokenType.LINK_CLOSE);
+    expect(opens).toHaveLength(500);
+    expect(closes).toHaveLength(500);
+  });
+
+  it('alternating markup and text', () => {
+    // Pattern: text[[link]]text{{tmpl}}text
+    const unit = 'hello[[Page]]world{{Tmpl}}done\n';
+    const input = unit.repeat(1000);
+    const t = tokens(input);
+    const last = t[t.length - 1];
+    expect(last.type).toBe(TokenType.EOF);
+    expect(last.start).toBe(input.length);
+    for (let idx = 1; idx < t.length; idx++) {
+      expect(t[idx].start).toBe(t[idx - 1].end);
+    }
+  });
+
+  it('long unclosed comment', () => {
+    // <!-- followed by 50K characters with no -->
+    const input = '<!--' + 'a'.repeat(50_000);
+    const t = tokens(input);
+    expect(t[0].type).toBe(TokenType.COMMENT_OPEN);
+    // The content should be TEXT (recovery for unclosed comment)
+    const textTokens = t.filter((tok) => tok.type === TokenType.TEXT);
+    expect(textTokens).toHaveLength(1);
+    expect(textTokens[0].end - textTokens[0].start).toBe(50_000);
+    const last = t[t.length - 1];
+    expect(last.type).toBe(TokenType.EOF);
+  });
+
+  it('many short lines with line-start markup', () => {
+    const lines = [
+      '== H ==', '* bullet', '# ordered', ': indent', '; term',
+      '{|', '! header', '|-', '| cell', '|}', '----',
+    ];
+    const input = lines.join('\n').repeat(200) + '\n';
+    const t = tokens(input);
+    const last = t[t.length - 1];
+    expect(last.type).toBe(TokenType.EOF);
+    expect(last.start).toBe(input.length);
+    for (let idx = 1; idx < t.length; idx++) {
+      expect(t[idx].start).toBe(t[idx - 1].end);
+    }
+  });
+
+  it('entity-heavy input', () => {
+    const input = '&amp; &#123; &#x1F4A9; &lt; &gt; &quot; '.repeat(500);
+    const t = tokens(input);
+    const entities = t.filter((tok) => tok.type === TokenType.HTML_ENTITY);
+    // 6 entities per repeat
+    expect(entities).toHaveLength(3000);
+  });
+
+  it('mixed apostrophe runs of varying lengths', () => {
+    // Single, double, triple, quadruple, quintuple apostrophes
+    const input = "a'b''c'''d''''e'''''f";
+    const t = tokens(input);
+    const runs = t.filter((tok) => tok.type === TokenType.APOSTROPHE_RUN);
+    // '' (2), ''' (3), '''' (4), ''''' (5)
+    expect(runs).toHaveLength(4);
+    // Single apostrophe should be TEXT
+    const singleApos = t.find((tok) =>
+      tok.type === TokenType.TEXT && tok.end - tok.start === 1 &&
+      input.slice(tok.start, tok.end) === "'"
+    );
+    expect(singleApos).toBeDefined();
+  });
+
+  it('signature-length tilde edge cases', () => {
+    // 1, 2 tildes = TEXT; 3,4,5 = SIGNATURE; 6+ = TEXT
+    const cases = [
+      { input: '~', expectSig: false },
+      { input: '~~', expectSig: false },
+      { input: '~~~', expectSig: true },
+      { input: '~~~~', expectSig: true },
+      { input: '~~~~~', expectSig: true },
+      { input: '~~~~~~', expectSig: false },
+      { input: '~~~~~~~', expectSig: false },
+    ];
+    for (const { input, expectSig } of cases) {
+      const t = tokens(input);
+      const sigs = t.filter((tok) => tok.type === TokenType.SIGNATURE);
+      if (expectSig) {
+        expect(sigs).toHaveLength(1);
+      } else {
+        expect(sigs).toHaveLength(0);
+      }
+    }
+  });
+
+  it('rapid line-start transitions', () => {
+    // Every character is on a new line
+    const input = 'a\nb\nc\nd\ne\n'.repeat(2000);
+    const t = tokens(input);
+    const newlines = t.filter((tok) => tok.type === TokenType.NEWLINE);
+    expect(newlines).toHaveLength(10_000);
   });
 });
 
