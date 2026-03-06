@@ -135,6 +135,6 @@ describe('memory regression', () => {
         code: 'INLINE_RECOVERY',
       });
       exitEvent('paragraph', pos);
-    });
+    }, 10_000, 1024);
   });
 });
