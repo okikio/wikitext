@@ -13,15 +13,16 @@
  *   (enter, exit, text, token, error)
  * - **{@linkcode WikistNode}** and family: the full AST node model,
  *   type guards, and builder functions
+ * - **{@linkcode tokenize}**: generator-based tokenizer over TextSource
  *
- * As more modules are implemented (tokenizer, block/inline parsers, tree
- * builder, stringifier, filter utilities), they will be re-exported from
- * this same entrypoint.
+ * As more modules are implemented (block/inline parsers, tree builder,
+ * stringifier, filter utilities), they will be re-exported from this
+ * same entrypoint.
  *
  * @example Importing core types
  * ```ts
  * import type { TextSource, Token, WikitextEvent, WikistNode } from '@okikio/wikitext';
- * import { TokenType } from '@okikio/wikitext';
+ * import { TokenType, tokenize } from '@okikio/wikitext';
  * ```
  *
  * @example Building a simple wikist tree
@@ -40,3 +41,4 @@ export * from './text_source.ts';
 export * from './token.ts';
 export * from './events.ts';
 export * from './ast.ts';
+export * from './tokenizer.ts';
