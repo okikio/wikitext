@@ -1,17 +1,16 @@
 /**
- * Wikist (Wiki Syntax Tree) node types, discriminated union, type guards,
- * and builder functions.
+ * Wikist node types, type guards, and builder functions.
  *
- * Wikist extends the [unist](https://github.com/syntax-tree/unist)
- * specification, following the pattern established by mdast (Markdown),
- * hast (HTML), and xast (XML). Every node has a string `type` discriminant
- * for exhaustive pattern matching, and an optional `position` recording
- * its source location.
+ * A token stream is great for scanning. An event stream is great for streaming
+ * work. But sometimes a caller wants something it can hold onto, walk later,
+ * and inspect with normal tree code. That is where the Wikist tree comes in.
  *
- * A wikitext document is parsed into a tree of nodes. Each piece of syntax
- * maps to a specific node type. Here is a complete example:
+ * A Wikist tree is the parser's structured view of a wikitext document. It is
+ * the same document shape the event stream describes, but materialized as
+ * nested objects.
  *
- * Source:
+ * For example, this source:
+ *
  * ```
  * == Introduction ==
  * This is '''bold''' and ''italic'' text.
@@ -20,81 +19,50 @@
  * * Second item
  * ```
  *
- * Tree:
- * ```
- * Root
- * ├── Heading (level: 2)
- * │   └── Text "Introduction"
- * ├── Paragraph
- * │   ├── Text "This is "
- * │   ├── Bold
- * │   │   └── Text "bold"
- * │   ├── Text " and "
- * │   ├── Italic
- * │   │   └── Text "italic"
- * │   └── Text " text."
- * └── List (ordered: false)
- *     ├── ListItem (marker: "*")
- *     │   └── Text "First item"
- *     └── ListItem (marker: "*")
- *         └── Text "Second item"
- * ```
- *
- * Three node categories mirror unist. Each category determines what data
- * a node carries, which guides how consumers walk the tree:
- *
- * - **Parent**: has `children` (e.g., headings, paragraphs, lists, tables).
- *   These are containers. A Heading is a parent because it holds inline
- *   content (text, bold, links). Walking a parent means recursing into
- *   `children`.
- *
- * - **Literal**: has `value` (e.g., text, comments, entities, nowiki).
- *   These are leaf nodes carrying string content. A Text node holds
- *   `"Introduction"`, an HtmlEntity holds `"&amp;"`. Walking a literal
- *   means reading `value`.
- *
- * - **Void**: neither children nor value (e.g., thematic breaks, behavior
- *   switches). These are self-contained markers. A ThematicBreak from
- *   `----` has no content to hold. Walking a void is a no-op.
+ * becomes a tree shaped roughly like this:
  *
  * ```
- * WikistNode (discriminated union on `type`)
- * ├── Parent nodes (have `children`)
- * │   ├── Root, Heading, Paragraph, List, Table, ...
- * │   ├── Bold, Italic, Wikilink, Template, ...
- * │   └── HtmlTag, Redirect, Gallery, Reference
- * ├── Literal nodes (have `value`)
- * │   ├── Text        ← plain inline text
- * │   ├── HtmlEntity  ← &amp; &#123; etc.
- * │   ├── Nowiki      ← <nowiki>...</nowiki>
- * │   └── Comment     ← <!-- ... -->
- * └── Void nodes (no children, no value)
- *     ├── ThematicBreak  ← ---- (horizontal rule)
- *     ├── CategoryLink   ← [[Category:...]]
- *     ├── Argument       ← {{{param}}}
- *     ├── MagicWord      ← {{PAGENAME}}
- *     ├── BehaviorSwitch ← __TOC__
- *     ├── Signature      ← ~~~~ (tildes)
- *     └── Break          ← <br/>
+ * root
+ * ├── heading (level: 2)
+ * │   └── text "Introduction"
+ * ├── paragraph
+ * │   ├── text "This is "
+ * │   ├── bold
+ * │   │   └── text "bold"
+ * │   ├── text " and "
+ * │   ├── italic
+ * │   │   └── text "italic"
+ * │   └── text " text."
+ * └── list (ordered: false)
+ *     ├── list-item
+ *     │   └── text "First item"
+ *     └── list-item
+ *         └── text "Second item"
  * ```
  *
- * Node types use **kebab-case** strings as their `type` discriminant:
- * `'heading'`, `'list-item'`, `'external-link'`, `'thematic-break'`.
- * Single-word types stay lowercase (`'heading'`, `'table'`, `'bold'`).
+ * The tree follows the same broad shape as unist, which is the small shared
+ * tree format used across tools like remark and rehype. In practice, that just
+ * means every node has a string `type`, some nodes have `children`, some have
+ * `value`, and positions are optional.
  *
- * The module provides three tools for working with wikist nodes:
+ * This file uses three broad node shapes because they are useful when walking a
+ * tree:
  *
- * 1. **Type guards** (`isHeading()`, `isParent()`, `isText()`, etc.)
- *    narrow a general `WikistNode` to a specific type, giving TypeScript
- *    access to the type-specific fields.
+ * - parent nodes hold other nodes in `children`
+ * - literal nodes hold string content in `value`
+ * - void nodes are stand-alone markers with neither `children` nor `value`
  *
- * 2. **Builder functions** (`heading()`, `text()`, `root()`, etc.)
- *    create nodes programmatically with the correct `type` discriminant.
+ * Those names are common in syntax-tree libraries, but the practical version is
+ * simpler: some nodes contain other nodes, some directly hold text, and some
+ * are just markers.
  *
- * 3. **Category unions** (`WikistParent`, `WikistLiteral`, `WikistVoid`)
- *    group nodes by structural category for generic tree-walking code.
+ * The module also gives you three kinds of helpers:
  *
- * @example Walking a wikist tree to collect text
+ * 1. type guards such as `isHeading()` and `isText()`
+ * 2. builder functions such as `heading()` and `text()`
+ * 3. grouped unions such as `WikistParent` for generic tree code
+ *
+ * @example Walking a tree to collect visible text
  * ```ts
  * import type { WikistNode } from './ast.ts';
  * import { isParent, isText } from './ast.ts';
@@ -106,39 +74,13 @@
  * }
  * ```
  *
- * @example Building a small tree programmatically
+ * @example Building a small tree by hand
  * ```ts
  * import { root, heading, text } from './ast.ts';
  *
  * const tree = root([
  *   heading(2, [text('Hello world')]),
  * ]);
- * tree.type;                    // 'root'
- * tree.children[0].type;        // 'heading'
- * ```
- *
- * @example Converting a table from wikitext to tree
- * ```ts
- * // Source:
- * // {| class="wikitable"
- * // ! Name !! Age
- * // |-
- * // | Alice || 30
- * // |}
- * //
- * // Tree:
- * import { table, tableRow, tableCell, text } from './ast.ts';
- *
- * const t = table([
- *   tableRow([
- *     tableCell(true, [text('Name')]),
- *     tableCell(true, [text('Age')]),
- *   ]),
- *   tableRow([
- *     tableCell(false, [text('Alice')]),
- *     tableCell(false, [text('30')]),
- *   ]),
- * ], 'class="wikitable"');
  * ```
  *
  * @module
@@ -155,12 +97,12 @@ import type { Position } from './events.ts';
 // It's the same pattern used by unist, mdast, and hast.
 
 /**
- * Common fields shared by all wikist nodes (per unist spec).
+ * Common fields shared by all Wikist nodes.
  *
- * Concrete node interfaces extend this base to inherit `position` and
- * `data` without repeating them. These fields are optional because
- * programmatically constructed nodes (from builder functions) don't have
- * a source location, and most consumers don't need the `data` bag.
+ * Concrete node interfaces extend this base so they all agree on where source
+ * positions live and where extra metadata can be attached. Both fields are
+ * optional because a node you build by hand may not come from a source file,
+ * and many callers will never need extra metadata at all.
  */
 export interface WikistNodeBase {
   /**
@@ -172,7 +114,7 @@ export interface WikistNodeBase {
   readonly position?: Position;
 
   /**
-   * Extension metadata bag (per unist spec).
+   * Optional extra metadata for tools built on top of the core parser.
    *
    * Not used by the core parser. Available for consumers, plugins, and
    * extensions that need to attach arbitrary data to nodes.
