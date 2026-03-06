@@ -65,9 +65,12 @@ Examples:
 
 For every exported function, interface, type alias, and constant:
 
-- Write TSDoc in plain English.
+- Write TSDoc in familiar language that a reasonably experienced JavaScript or TypeScript developer would understand without pausing.
 - Explain why it exists, not just what it is.
 - Ground the explanation in the problem being solved, the approach taken, and the assumptions or edge cases.
+- If you need a technical term, explain the concrete behavior first, then introduce the term if it is still useful.
+- When using technical or abstract terms, define them in concrete language the reader can picture in this codebase.
+- Tie abstractions to a real behavior, cost, failure mode, or downstream benefit.
 - Every field of an exported interface or public type needs its own JSDoc comment.
 - Any type referenced in a public signature must itself be exported.
 
@@ -118,6 +121,7 @@ When needed, include:
 * the key assumptions
 * a step-by-step walkthrough
 * clarification of abstract codes or markers
+* a grounded explanation of technical terms
 * an ASCII diagram if it materially improves understanding
 
 ## Error handling
