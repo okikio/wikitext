@@ -482,7 +482,7 @@ Flat files at root alongside `mod.ts`. No `src/` folder.
 |------|------|
 | `ast.ts` | Wikist node types, type guards, builders |
 | `events.ts` | `WikitextEvent` union, constructors |
-| `token.ts` | `Token` interface, `TokenType` enum |
+| `token.ts` | `Token` interface, `TokenType` const-object |
 | `tokenizer.ts` | Generator-based scanner |
 | `block_parser.ts` | Block-level event emitter |
 | `inline_parser.ts` | Inline event enrichment |
