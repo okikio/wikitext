@@ -19,14 +19,22 @@ the task is specifically about commits or changelogs.
 
 Use Conventional Commits:
 
-```text
-<type>(<scope>): <description>
-```
+Use this commit subject shape:
+`type(scope?): short outcome summary`
+
+Replace `type`, `scope`, and the summary with real values.
+Do not output the placeholder words literally.
 
 Examples:
 
-* `fix: prevent double-stripping on nested undent calls`
-* `feat(parser): add outline-only event stream`
+- `fix(parser): preserve trailing blank lines in stringify`
+- `docs: add header quality rules for TSDoc sections`
+- `feat(events): add outline-only event stream`
+
+Do not write:
+- `<type>(<scope>): <description>` (literally)
+- `fix: improve code`
+- `chore: update stuff`
 
 ## Subject rules
 
