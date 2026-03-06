@@ -8,11 +8,54 @@
  * for exhaustive pattern matching, and an optional `position` recording
  * its source location.
  *
- * Three node categories mirror unist:
+ * A wikitext document is parsed into a tree of nodes. Each piece of syntax
+ * maps to a specific node type. Here is a complete example:
  *
- * - **Parent**: has `children` (e.g., headings, paragraphs, lists, tables)
- * - **Literal**: has `value` (e.g., text, comments, entities, nowiki)
- * - **Void**: neither children nor value (e.g., thematic breaks, behavior switches)
+ * Source:
+ * ```
+ * == Introduction ==
+ * This is '''bold''' and ''italic'' text.
+ *
+ * * First item
+ * * Second item
+ * ```
+ *
+ * Tree:
+ * ```
+ * Root
+ * ├── Heading (level: 2)
+ * │   └── Text "Introduction"
+ * ├── Paragraph
+ * │   ├── Text "This is "
+ * │   ├── Bold
+ * │   │   └── Text "bold"
+ * │   ├── Text " and "
+ * │   ├── Italic
+ * │   │   └── Text "italic"
+ * │   └── Text " text."
+ * └── List (ordered: false)
+ *     ├── ListItem (marker: "*")
+ *     │   └── Text "First item"
+ *     └── ListItem (marker: "*")
+ *         └── Text "Second item"
+ * ```
+ *
+ * Three node categories mirror unist. Each category determines what data
+ * a node carries, which guides how consumers walk the tree:
+ *
+ * - **Parent**: has `children` (e.g., headings, paragraphs, lists, tables).
+ *   These are containers. A Heading is a parent because it holds inline
+ *   content (text, bold, links). Walking a parent means recursing into
+ *   `children`.
+ *
+ * - **Literal**: has `value` (e.g., text, comments, entities, nowiki).
+ *   These are leaf nodes carrying string content. A Text node holds
+ *   `"Introduction"`, an HtmlEntity holds `"&amp;"`. Walking a literal
+ *   means reading `value`.
+ *
+ * - **Void**: neither children nor value (e.g., thematic breaks, behavior
+ *   switches). These are self-contained markers. A ThematicBreak from
+ *   `----` has no content to hold. Walking a void is a no-op.
  *
  * ```
  * WikistNode (discriminated union on `type`)
@@ -38,8 +81,6 @@
  * Node types use **kebab-case** strings as their `type` discriminant:
  * `'heading'`, `'list-item'`, `'external-link'`, `'thematic-break'`.
  * Single-word types stay lowercase (`'heading'`, `'table'`, `'bold'`).
- *
- * ## How to work with the tree
  *
  * The module provides three tools for working with wikist nodes:
  *
@@ -74,6 +115,30 @@
  * ]);
  * tree.type;                    // 'root'
  * tree.children[0].type;        // 'heading'
+ * ```
+ *
+ * @example Converting a table from wikitext to tree
+ * ```ts
+ * // Source:
+ * // {| class="wikitable"
+ * // ! Name !! Age
+ * // |-
+ * // | Alice || 30
+ * // |}
+ * //
+ * // Tree:
+ * import { table, tableRow, tableCell, text } from './ast.ts';
+ *
+ * const t = table([
+ *   tableRow([
+ *     tableCell(true, [text('Name')]),
+ *     tableCell(true, [text('Age')]),
+ *   ]),
+ *   tableRow([
+ *     tableCell(false, [text('Alice')]),
+ *     tableCell(false, [text('30')]),
+ *   ]),
+ * ], 'class="wikitable"');
  * ```
  *
  * @module
@@ -450,6 +515,22 @@ export interface ImageLink extends WikistNodeBase {
  * MediaWiki configuration. Variable-style magic words (`{{PAGENAME}}`)
  * are parsed as `Template` by default; profiles or consumers may
  * reclassify them.
+ *
+ * The `{{ }}` family of constructs all share the same delimiter syntax
+ * but differ in behavior:
+ *
+ * | Wikitext | Node | Why |
+ * |----------|------|-----|
+ * | `{{Infobox\|...}}` | Template | no `#` prefix, default classification |
+ * | `{{#if:...\|...}}` | ParserFunction | `#` prefix identifies it |
+ * | `{{PAGENAME}}` | Template (initially) | looks like a template; profiles may reclassify as MagicWord |
+ * | `{{{1\|default}}}` | Argument | triple braces, not double |
+ *
+ * A source parser cannot distinguish variable-style magic words from
+ * templates without MediaWiki's configured word list, so both parse as
+ * Template by default. This is a deliberate design choice: the parser
+ * stays configuration-free and lets consumers apply knowledge of which
+ * words are "magic" in their environment.
  */
 export interface Template extends WikistNodeBase {
   /** Node type discriminant. */
@@ -611,6 +692,23 @@ export interface MagicWord extends WikistNodeBase {
 
 /**
  * Double-underscore behavior switch: `__TOC__`, `__NOTOC__`, etc.
+ *
+ * Behavior switches alter how MediaWiki renders a page without producing
+ * visible content. Common examples:
+ *
+ * | Switch | Effect |
+ * |--------|--------|
+ * | `__TOC__` | Place the table of contents here |
+ * | `__NOTOC__` | Suppress the table of contents |
+ * | `__NOEDITSECTION__` | Hide section edit links |
+ * | `__FORCETOC__` | Force the table of contents even with few headings |
+ *
+ * The tokenizer emits a `BEHAVIOR_SWITCH` token for any `__LETTERS__`
+ * pattern (ASCII letters between double underscores). The AST node then
+ * stores the word without the underscores in the `name` field. Whether
+ * the word is actually recognized by a given MediaWiki installation is
+ * a consumer/profile concern: extensions can register new switches, so
+ * the full set is not fixed.
  */
 export interface BehaviorSwitch extends WikistNodeBase {
   /** Node type discriminant. */
@@ -721,9 +819,19 @@ export interface Conflict extends WikistNodeBase {
 // This lets the compiler narrow the type inside a switch statement:
 //
 //   switch (node.type) {
-//     case 'heading':    node.level;     // ✓ TypeScript knows this is a Heading
-//     case 'text':       node.value;     // ✓ TypeScript knows this is a Text
-//     case 'bold':       node.children;  // ✓ TypeScript knows this is a Bold
+//     case 'heading':    node.level;     // TypeScript knows this is a Heading
+//     case 'text':       node.value;     // TypeScript knows this is a Text
+//     case 'bold':       node.children;  // TypeScript knows this is a Bold
+//   }
+//
+// Why this matters: without the union, you would need explicit casts or
+// type assertions to access type-specific fields. The discriminated union
+// makes the compiler do the narrowing for you, catching mismatches at
+// compile time:
+//
+//   if (node.type === 'heading') {
+//     node.level;   // level is accessible here
+//     node.value;   // compile error: Heading has no `value`
 //   }
 //
 // The pattern appears throughout this codebase: WikistNode, WikitextEvent,
