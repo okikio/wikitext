@@ -1,90 +1,68 @@
 /**
- * Event types for the wikitext parser's event stream.
+ * Event types for the parser's main output stream.
  *
- * Events are the fundamental interchange format of the parser. Rather than
- * producing an AST as the primary output, the parser emits a flat stream of
- * events that encode the same structural information. Consumers then choose
- * how much structure to materialize: a full tree, an HTML string, a filtered
- * subset, or direct callbacks — all from the same event sequence.
+ * This parser is designed around events first, not tree nodes first. That can
+ * sound abstract, so here is the practical version.
  *
- * An AST requires allocating every node upfront. For large articles (200 KB+),
- * this is expensive. An event stream is cheaper to produce and lets
- * consumers bail out early (e.g., "find the first heading and stop"). Events
- * compose well: you can filter, transform, or pipe them without building
- * intermediate trees.
+ * Sometimes a caller wants the full tree. Sometimes it only wants the first
+ * heading, a table of contents, or a stream it can transform on the fly.
+ * Building a full AST for every case forces extra work even when the caller
+ * does not need it. Events are the cheaper middle layer that all of those
+ * outputs can share. The tree builder is just one consumer of that stream.
  *
- * ## Enter/exit pairs and stack discipline
+ * Think of the stream as a running narration of what the parser is finding:
  *
- * The event stream uses **enter/exit pairs** with stack discipline, similar
- * to SAX for XML. For the input `== Hello ==\nText`, the event stream
- * looks like:
+ * - "a heading starts here"
+ * - "this text belongs inside it"
+ * - "the heading ends here"
+ * - "a paragraph starts now"
  *
- * ```
- * enter('heading', { level: 2 })   <- open the heading node
- *   text(3, 8)                     <- "Hello" (offsets, not a string)
- * exit('heading')                  <- close the heading node
- * enter('paragraph')               <- open a paragraph
- *   text(12, 16)                   <- "Text"
- * exit('paragraph')                <- close the paragraph
- * ```
+ * For `== Hello ==\nText`, that looks like this:
  *
- * The nesting is always well-formed: every `enter(X)` has a matching
- * `exit(X)`, and they nest like parentheses. This guarantee means consumers
- * can track depth with a simple counter or stack.
- *
- * When wikitext nests one element inside another (a link inside a heading,
- * bold inside a template, etc.), the event stream reflects that nesting.
- * This is the key property that lets consumers reconstruct a tree or
- * produce nested HTML tags from a flat sequence.
- *
- * Consider a link inside a heading:
- *
- * ```
- * Source: "== See [[Mars]] =="
- *          0123456789...
+ * ```ts
+ * enter('heading', { level: 2 })
+ *   text(3, 8)   // "Hello"
+ * exit('heading')
+ * enter('paragraph')
+ *   text(12, 16) // "Text"
+ * exit('paragraph')
  * ```
  *
- * The parser walks through this in order:
+ * The important rule is that open and close events stay properly nested. In
+ * plain English, if something starts inside a heading, it also has to finish
+ * before the heading finishes. That is what parser docs often call stack
+ * discipline.
  *
- * 1. It sees `==` at position 0 -- opens a heading.
- * 2. It skips the space and sees ordinary text `"See "`.
- * 3. It sees `[[` at position 7 -- opens a wikilink *inside* the heading.
- * 4. It sees `"Mars"` as text inside the link.
- * 5. It sees `]]` at position 15 -- closes the wikilink.
- * 6. It sees `" "` then `==` -- closes the heading.
- *
- * The event stream looks like:
- *
- * ```
- * enter('heading', { level: 2 })      depth 1
- *   text(3, 7)                        "See "
- *   enter('wikilink')                 depth 2
- *     text(9, 13)                     "Mars"
- *   exit('wikilink')                  back to depth 1
- *   text(15, 16)                      " "
- * exit('heading')                     back to depth 0
+ * ```ts
+ * enter('heading')
+ *   enter('wikilink')
+ *   exit('wikilink')
+ * exit('heading')
  * ```
  *
- * The stack discipline is visible in the indentation. A consumer tracking
- * depth would see: 0 -> 1 -> 2 -> 1 -> 0. The enter/exit pairs always
- * nest properly -- you never see `exit('heading')` before
- * `exit('wikilink')`.
+ * You should never see this broken order:
  *
- * Text and token events carry **offset ranges** (start/end integers) into
- * the source text, not allocated strings. This range-first approach matches
- * the offset discipline used by raw tokens and avoids per-event string
- * allocation. When a consumer needs the actual text, it calls
- * `slice(source, evt.start_offset, evt.end_offset)`.
+ * ```ts
+ * enter('heading')
+ *   enter('wikilink')
+ * exit('heading')   // wrong
+ * exit('wikilink')  // wrong
+ * ```
+ *
+ * Text and token events store source ranges, not copied strings. That means an
+ * event says "the text is from offset 3 to offset 8" instead of carrying a new
+ * string like `"Hello"`. A caller can recover the real text later with
+ * `slice(source, start, end)` when it actually needs it.
  *
  * The five event kinds are:
  *
- * | Kind    | Purpose                                           |
- * |---------|---------------------------------------------------|
- * | `enter` | Opens a node (carries node type + properties)     |
- * | `exit`  | Closes the most recently opened node of that type |
- * | `text`  | A range of literal text content (offsets)         |
- * | `token` | A raw tokenizer token exposed in the stream       |
- * | `error` | Optional recovery event (parser never throws)     |
+ * | Kind    | What it means |
+ * |---------|----------------|
+ * | `enter` | a node starts here |
+ * | `exit`  | the matching node ends here |
+ * | `text`  | plain text from the source |
+ * | `token` | a raw tokenizer token surfaced in the stream |
+ * | `error` | recovery information when the parser had to keep going through bad input |
  *
  * @example Processing a stream of events
  * ```ts
@@ -94,38 +72,32 @@
  *   for (const evt of events) {
  *     switch (evt.kind) {
  *       case 'enter': console.log(`open ${evt.node_type}`); break;
- *       case 'exit':  console.log(`close ${evt.node_type}`); break;
- *       case 'text':  console.log(`text [${evt.start_offset}..${evt.end_offset})`); break;
+ *       case 'exit': console.log(`close ${evt.node_type}`); break;
+ *       case 'text': console.log(`text [${evt.start_offset}..${evt.end_offset})`); break;
  *       case 'token': console.log(`token ${evt.token_type}`); break;
+ *       case 'error': console.log(`error ${evt.message}`); break;
  *     }
  *   }
  * }
  * ```
  *
- * @example Building an enter event
- * ```ts
- * import { enterEvent } from './events.ts';
- *
- * const evt = enterEvent('heading', { level: 2 }, {
- *   start: { line: 1, column: 1, offset: 0 },
- *   end: { line: 1, column: 14, offset: 13 },
- * });
- * evt.kind;     // 'enter'
- * evt.node_type; // 'heading'
- * evt.props;    // { level: 2 }
- * ```
- *
- * @example Tracking depth with a counter
+ * @example Tracking the current nesting depth
  * ```ts
  * import type { WikitextEvent } from './events.ts';
  *
  * function maxDepth(events: Iterable<WikitextEvent>): number {
  *   let depth = 0;
  *   let max = 0;
+ *
  *   for (const evt of events) {
- *     if (evt.kind === 'enter') { depth++; max = Math.max(max, depth); }
- *     if (evt.kind === 'exit') { depth--; }
+ *     if (evt.kind === 'enter') {
+ *       depth++;
+ *       max = Math.max(max, depth);
+ *     } else if (evt.kind === 'exit') {
+ *       depth--;
+ *     }
  *   }
+ *
  *   return max;
  * }
  * ```
@@ -155,13 +127,12 @@ export type DiagnosticSeverity = 'error' | 'warning';
 // like VS Code.
 
 /**
- * A specific location in a source file.
+ * A single place in the source text.
  *
- * A cursor position in the source: which line, which column, and the
- * absolute character offset from the start of the file.
- *
- * All fields use UTF-16 code unit measurements, matching JS string indexing
- * and LSP's mandatory `utf-16` position encoding.
+ * This stores three views of the same location: line number, column number,
+ * and absolute offset from the start of the input. All measurements use the
+ * same UTF-16 indexing JavaScript strings already use, so positions line up
+ * with `charCodeAt()`, `slice()`, and most editor integrations.
  */
 export interface Point {
   /** 1-indexed line number. */
@@ -173,7 +144,7 @@ export interface Point {
 }
 
 /**
- * A contiguous range in the source, defined by its start and end points.
+ * A source range with a start point and an end point.
  */
 export interface Position {
   /** Inclusive start point. */
