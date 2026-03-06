@@ -187,14 +187,14 @@ function isAsciiAlphanumeric(code: number): boolean {
 // ---------------------------------------------------------------------------
 
 /**
- * Set of recognized behavior switch keywords (without the `__` delimiters).
+ * Recognized behavior switch keywords (without the `__` delimiters).
  *
  * MediaWiki defines these as "double-underscore" magic words that toggle
  * page-level behaviors. The tokenizer recognizes the `__WORD__` pattern
- * and emits a BEHAVIOR_SWITCH token only when the word is in this set.
+ * and emits a BEHAVIOR_SWITCH token only when the word is in this list.
  * Unknown `__WORD__` patterns are emitted as plain text.
  */
-const BEHAVIOR_SWITCHES: ReadonlySet<string> = new Set([
+const BEHAVIOR_SWITCH_WORDS: readonly string[] = [
   'TOC',
   'NOTOC',
   'FORCETOC',
@@ -214,7 +214,34 @@ const BEHAVIOR_SWITCHES: ReadonlySet<string> = new Set([
   'STATICREDIRECT',
   'NOGLOBAL',
   'DISAMBIG',
-]);
+];
+
+/**
+ * Check whether the region `[start, end)` in `source` matches `word`
+ * character by character, without allocating a substring.
+ *
+ * This avoids `source.slice()` in the hot loop. For a rope-backed
+ * {@linkcode TextSource}, `slice()` could involve node traversal and
+ * concatenation; `charCodeAt` comparisons are always O(1) per character.
+ */
+function matchesWord(source: TextSource, start: number, word: string): boolean {
+  for (let k = 0; k < word.length; k++) {
+    if (source.charCodeAt(start + k) !== word.charCodeAt(k)) return false;
+  }
+  return true;
+}
+
+/**
+ * Check whether the region `[start, end)` of `source` is a recognized
+ * behavior switch keyword, without allocating a substring.
+ */
+function isBehaviorSwitchWord(source: TextSource, start: number, end: number): boolean {
+  const wordLen = end - start;
+  for (const word of BEHAVIOR_SWITCH_WORDS) {
+    if (word.length === wordLen && matchesWord(source, start, word)) return true;
+  }
+  return false;
+}
 
 // ---------------------------------------------------------------------------
 // Tokenizer
@@ -267,483 +294,13 @@ export function* tokenize(source: TextSource): Generator<Token> {
     const code = source.charCodeAt(i);
 
     // -----------------------------------------------------------------------
-    // Newline: \n, \r\n, or bare \r
-    // -----------------------------------------------------------------------
-    if (code === CC_LF || code === CC_CR) {
-      const start = i;
-      if (code === CC_CR && i + 1 < len && source.charCodeAt(i + 1) === CC_LF) {
-        i += 2;
-      } else {
-        i += 1;
-      }
-      yield tok(TokenType.NEWLINE, start, i);
-      lineStart = true;
-      continue;
-    }
-
-    // === Line-start-only markup ===
-    // These tokens are only recognized when `lineStart` is true.
-
-    if (lineStart) {
-      // Space at line start: preformatted marker
-      if (code === CC_SPACE) {
-        yield tok(TokenType.PREFORMATTED_MARKER, i, i + 1);
-        i += 1;
-        lineStart = false;
-        continue;
-      }
-
-      // Heading: one or more '=' at line start
-      if (code === CC_EQUALS) {
-        const start = i;
-        while (i < len && source.charCodeAt(i) === CC_EQUALS) i++;
-        yield tok(TokenType.HEADING_MARKER, start, i);
-        lineStart = false;
-        continue;
-      }
-
-      // Bullet list: '*' at line start (may stack)
-      if (code === CC_ASTERISK) {
-        yield tok(TokenType.BULLET, i, i + 1);
-        i += 1;
-        // Stay lineStart=true so stacked markers (*#:;) are recognized
-        continue;
-      }
-
-      // Ordered list: '#' at line start (may stack)
-      if (code === CC_HASH) {
-        yield tok(TokenType.HASH, i, i + 1);
-        i += 1;
-        continue;
-      }
-
-      // Definition list: ':' at line start
-      if (code === CC_COLON) {
-        yield tok(TokenType.COLON, i, i + 1);
-        i += 1;
-        continue;
-      }
-
-      // Definition term: ';' at line start
-      if (code === CC_SEMICOLON) {
-        yield tok(TokenType.SEMICOLON, i, i + 1);
-        i += 1;
-        continue;
-      }
-
-      // Table open: '{|' at line start
-      if (code === CC_OPEN_BRACE && i + 1 < len && source.charCodeAt(i + 1) === CC_PIPE) {
-        yield tok(TokenType.TABLE_OPEN, i, i + 2);
-        i += 2;
-        lineStart = false;
-        continue;
-      }
-
-      // Table close: '|}' at line start
-      if (code === CC_PIPE && i + 1 < len && source.charCodeAt(i + 1) === CC_CLOSE_BRACE) {
-        yield tok(TokenType.TABLE_CLOSE, i, i + 2);
-        i += 2;
-        lineStart = false;
-        continue;
-      }
-
-      // Table row: '|-' at line start
-      if (code === CC_PIPE && i + 1 < len && source.charCodeAt(i + 1) === CC_DASH) {
-        yield tok(TokenType.TABLE_ROW, i, i + 2);
-        i += 2;
-        lineStart = false;
-        continue;
-      }
-
-      // Table caption: '|+' at line start
-      if (code === CC_PIPE && i + 1 < len && source.charCodeAt(i + 1) === 0x2b) {
-        yield tok(TokenType.TABLE_CAPTION, i, i + 2);
-        i += 2;
-        lineStart = false;
-        continue;
-      }
-
-      // Table header cell: '!' at line start
-      if (code === CC_BANG) {
-        yield tok(TokenType.TABLE_HEADER_CELL, i, i + 1);
-        i += 1;
-        lineStart = false;
-        continue;
-      }
-
-      // Table cell: '|' at line start (single pipe, not matched above)
-      if (code === CC_PIPE) {
-        yield tok(TokenType.PIPE, i, i + 1);
-        i += 1;
-        lineStart = false;
-        continue;
-      }
-
-      // Thematic break: '----' (4+ dashes) at line start
-      if (code === CC_DASH) {
-        const start = i;
-        while (i < len && source.charCodeAt(i) === CC_DASH) i++;
-        if (i - start >= 4) {
-          yield tok(TokenType.THEMATIC_BREAK, start, i);
-        } else {
-          // Fewer than 4 dashes: plain text
-          yield tok(TokenType.TEXT, start, i);
-        }
-        lineStart = false;
-        continue;
-      }
-    }
-
-    // After any non-newline, non-line-start-marker token, we are no
-    // longer at line start.
-    lineStart = false;
-
-    // -----------------------------------------------------------------------
-    // Whitespace: spaces and tabs (not at line start)
-    // -----------------------------------------------------------------------
-    if (code === CC_SPACE || code === CC_TAB) {
-      const start = i;
-      while (i < len) {
-        const c = source.charCodeAt(i);
-        if (c !== CC_SPACE && c !== CC_TAB) break;
-        i++;
-      }
-      yield tok(TokenType.WHITESPACE, start, i);
-      continue;
-    }
-
-    // -----------------------------------------------------------------------
-    // Comment: <!-- ... -->
+    // Fast path: ordinary text
     //
-    // Must check before generic '<' handling. The scanner looks for the
-    // 4-char sequence '<!--' and then searches for '-->'. If the closing
-    // sequence is missing, the comment extends to end of input (recovery).
+    // Most input is plain prose. If this character is non-ASCII or not a
+    // delimiter, jump straight into a tight TEXT scan loop without paying
+    // for any of the syntax-detection branches below.
     // -----------------------------------------------------------------------
-    if (code === CC_LT &&
-      i + 3 < len &&
-      source.charCodeAt(i + 1) === CC_BANG &&
-      source.charCodeAt(i + 2) === CC_DASH &&
-      source.charCodeAt(i + 3) === CC_DASH) {
-      yield tok(TokenType.COMMENT_OPEN, i, i + 4);
-      i += 4;
-      // Scan for '-->'
-      const contentStart = i;
-      let found = false;
-      while (i < len) {
-        if (source.charCodeAt(i) === CC_DASH &&
-          i + 2 < len &&
-          source.charCodeAt(i + 1) === CC_DASH &&
-          source.charCodeAt(i + 2) === CC_GT) {
-          // Emit comment body as TEXT if non-empty
-          if (i > contentStart) {
-            yield tok(TokenType.TEXT, contentStart, i);
-          }
-          yield tok(TokenType.COMMENT_CLOSE, i, i + 3);
-          i += 3;
-          found = true;
-          break;
-        }
-        i++;
-      }
-      // Unclosed comment: emit remaining as TEXT (recovery)
-      if (!found && i > contentStart) {
-        yield tok(TokenType.TEXT, contentStart, i);
-      }
-      continue;
-    }
-
-    // -----------------------------------------------------------------------
-    // HTML tag-like: <tag>, </tag>, <tag />, but not comments
-    //
-    // We recognize:
-    //   '</'  → CLOSING_TAG_OPEN
-    //   '<'   → TAG_OPEN  (if followed by letter)
-    //   '/>'  → SELF_CLOSING_TAG_END
-    //   '>'   → TAG_CLOSE
-    // -----------------------------------------------------------------------
-    if (code === CC_LT) {
-      // '</': closing tag open
-      if (i + 1 < len && source.charCodeAt(i + 1) === CC_SLASH) {
-        yield tok(TokenType.CLOSING_TAG_OPEN, i, i + 2);
-        i += 2;
-        continue;
-      }
-      // '<' followed by letter: tag open
-      if (i + 1 < len && isAsciiLetter(source.charCodeAt(i + 1))) {
-        yield tok(TokenType.TAG_OPEN, i, i + 1);
-        i += 1;
-        continue;
-      }
-      // Bare '<': plain text
-      yield tok(TokenType.TEXT, i, i + 1);
-      i += 1;
-      continue;
-    }
-
-    // '/>' self-closing tag end
-    if (code === CC_SLASH && i + 1 < len && source.charCodeAt(i + 1) === CC_GT) {
-      yield tok(TokenType.SELF_CLOSING_TAG_END, i, i + 2);
-      i += 2;
-      continue;
-    }
-
-    // '>' tag close
-    if (code === CC_GT) {
-      yield tok(TokenType.TAG_CLOSE, i, i + 1);
-      i += 1;
-      continue;
-    }
-
-    // -----------------------------------------------------------------------
-    // HTML entity: &...;
-    //
-    // Recognize patterns: &name; or &#digits; or &#xhex;
-    // If the pattern doesn't close with ';' within a reasonable span,
-    // emit the '&' as TEXT.
-    // -----------------------------------------------------------------------
-    if (code === CC_AMP) {
-      const start = i;
-      let j = i + 1;
-      // Named entity: &[a-zA-Z][a-zA-Z0-9]*;
-      // Numeric entity: &#[0-9]+; or &#x[0-9a-fA-F]+;
-      if (j < len) {
-        const next = source.charCodeAt(j);
-        // Numeric entity
-        if (next === CC_HASH) {
-          j++;
-          if (j < len && (source.charCodeAt(j) === 0x78 || source.charCodeAt(j) === 0x58)) {
-            // &#x hex
-            j++;
-            const hexStart = j;
-            while (j < len && isHexDigit(source.charCodeAt(j))) j++;
-            if (j > hexStart && j < len && source.charCodeAt(j) === CC_SEMICOLON) {
-              j++;
-              yield tok(TokenType.HTML_ENTITY, start, j);
-              i = j;
-              continue;
-            }
-          } else {
-            // &#decimal
-            const decStart = j;
-            while (j < len && isAsciiDigit(source.charCodeAt(j))) j++;
-            if (j > decStart && j < len && source.charCodeAt(j) === CC_SEMICOLON) {
-              j++;
-              yield tok(TokenType.HTML_ENTITY, start, j);
-              i = j;
-              continue;
-            }
-          }
-        }
-        // Named entity
-        else if (isAsciiLetter(next)) {
-          j++;
-          while (j < len && isAsciiAlphanumeric(source.charCodeAt(j))) j++;
-          if (j < len && source.charCodeAt(j) === CC_SEMICOLON) {
-            j++;
-            yield tok(TokenType.HTML_ENTITY, start, j);
-            i = j;
-            continue;
-          }
-        }
-      }
-      // Not a valid entity: emit '&' as text
-      yield tok(TokenType.TEXT, i, i + 1);
-      i += 1;
-      continue;
-    }
-
-    // -----------------------------------------------------------------------
-    // Triple braces: {{{ ... }}} (argument)
-    // Must check before double braces.
-    // -----------------------------------------------------------------------
-    if (code === CC_OPEN_BRACE &&
-      i + 2 < len &&
-      source.charCodeAt(i + 1) === CC_OPEN_BRACE &&
-      source.charCodeAt(i + 2) === CC_OPEN_BRACE) {
-      yield tok(TokenType.ARGUMENT_OPEN, i, i + 3);
-      i += 3;
-      continue;
-    }
-
-    if (code === CC_CLOSE_BRACE &&
-      i + 2 < len &&
-      source.charCodeAt(i + 1) === CC_CLOSE_BRACE &&
-      source.charCodeAt(i + 2) === CC_CLOSE_BRACE) {
-      yield tok(TokenType.ARGUMENT_CLOSE, i, i + 3);
-      i += 3;
-      continue;
-    }
-
-    // -----------------------------------------------------------------------
-    // Double braces: {{ ... }} (template)
-    // -----------------------------------------------------------------------
-    if (code === CC_OPEN_BRACE &&
-      i + 1 < len &&
-      source.charCodeAt(i + 1) === CC_OPEN_BRACE) {
-      yield tok(TokenType.TEMPLATE_OPEN, i, i + 2);
-      i += 2;
-      continue;
-    }
-
-    if (code === CC_CLOSE_BRACE &&
-      i + 1 < len &&
-      source.charCodeAt(i + 1) === CC_CLOSE_BRACE) {
-      yield tok(TokenType.TEMPLATE_CLOSE, i, i + 2);
-      i += 2;
-      continue;
-    }
-
-    // -----------------------------------------------------------------------
-    // Double brackets: [[ ... ]] (wikilink)
-    // Single bracket: [ ... ] (external link)
-    // -----------------------------------------------------------------------
-    if (code === CC_OPEN_BRACKET) {
-      if (i + 1 < len && source.charCodeAt(i + 1) === CC_OPEN_BRACKET) {
-        yield tok(TokenType.LINK_OPEN, i, i + 2);
-        i += 2;
-        continue;
-      }
-      yield tok(TokenType.EXT_LINK_OPEN, i, i + 1);
-      i += 1;
-      continue;
-    }
-
-    if (code === CC_CLOSE_BRACKET) {
-      if (i + 1 < len && source.charCodeAt(i + 1) === CC_CLOSE_BRACKET) {
-        yield tok(TokenType.LINK_CLOSE, i, i + 2);
-        i += 2;
-        continue;
-      }
-      yield tok(TokenType.EXT_LINK_CLOSE, i, i + 1);
-      i += 1;
-      continue;
-    }
-
-    // -----------------------------------------------------------------------
-    // Pipe and double pipe: | and ||
-    // -----------------------------------------------------------------------
-    if (code === CC_PIPE) {
-      if (i + 1 < len && source.charCodeAt(i + 1) === CC_PIPE) {
-        yield tok(TokenType.DOUBLE_PIPE, i, i + 2);
-        i += 2;
-        continue;
-      }
-      yield tok(TokenType.PIPE, i, i + 1);
-      i += 1;
-      continue;
-    }
-
-    // -----------------------------------------------------------------------
-    // Bang: '!!' (inline header cell separator, not at line start)
-    // -----------------------------------------------------------------------
-    if (code === CC_BANG) {
-      if (i + 1 < len && source.charCodeAt(i + 1) === CC_BANG) {
-        yield tok(TokenType.DOUBLE_BANG, i, i + 2);
-        i += 2;
-        continue;
-      }
-      // Single '!' not at line start is plain text
-      yield tok(TokenType.TEXT, i, i + 1);
-      i += 1;
-      continue;
-    }
-
-    // -----------------------------------------------------------------------
-    // Apostrophe runs: '' (italic), ''' (bold), ''''' (bold+italic)
-    //
-    // Emit the full run; the inline parser disambiguates.
-    // -----------------------------------------------------------------------
-    if (code === CC_APOSTROPHE) {
-      const start = i;
-      while (i < len && source.charCodeAt(i) === CC_APOSTROPHE) i++;
-      const runLen = i - start;
-      if (runLen >= 2) {
-        yield tok(TokenType.APOSTROPHE_RUN, start, i);
-      } else {
-        // Single apostrophe: plain text
-        yield tok(TokenType.TEXT, start, i);
-      }
-      continue;
-    }
-
-    // -----------------------------------------------------------------------
-    // Tilde runs: ~~~ (sig), ~~~~ (sig+date), ~~~~~ (date)
-    // -----------------------------------------------------------------------
-    if (code === CC_TILDE) {
-      const start = i;
-      while (i < len && source.charCodeAt(i) === CC_TILDE) i++;
-      const runLen = i - start;
-      if (runLen >= 3 && runLen <= 5) {
-        yield tok(TokenType.SIGNATURE, start, i);
-      } else {
-        // Not a signature run: plain text
-        yield tok(TokenType.TEXT, start, i);
-      }
-      continue;
-    }
-
-    // -----------------------------------------------------------------------
-    // Behavior switches: __TOC__, __NOTOC__, etc.
-    //
-    // Two underscores, then ALLCAPS word, then two underscores. Only
-    // recognized words emit BEHAVIOR_SWITCH; others fall through as text.
-    // -----------------------------------------------------------------------
-    if (code === CC_UNDERSCORE &&
-      i + 1 < len &&
-      source.charCodeAt(i + 1) === CC_UNDERSCORE) {
-      const start = i;
-      let j = i + 2;
-      // Scan the uppercase word
-      while (j < len && isAsciiLetter(source.charCodeAt(j))) j++;
-      // Check for closing '__'
-      if (j + 1 < len &&
-        source.charCodeAt(j) === CC_UNDERSCORE &&
-        source.charCodeAt(j + 1) === CC_UNDERSCORE) {
-        const word = source.slice(i + 2, j);
-        if (BEHAVIOR_SWITCHES.has(word)) {
-          yield tok(TokenType.BEHAVIOR_SWITCH, start, j + 2);
-          i = j + 2;
-          continue;
-        }
-      }
-      // Not a recognized behavior switch: emit '__' as text
-      yield tok(TokenType.TEXT, i, i + 2);
-      i += 2;
-      continue;
-    }
-
-    // -----------------------------------------------------------------------
-    // Equals sign (not at line start): EQUALS
-    //
-    // At line start, '=' was already handled as HEADING_MARKER.
-    // Trailing '=' for heading close is handled by a post-scan within
-    // the heading context. For now, mid-line '=' becomes EQUALS (used
-    // as template parameter separator by the block/inline parser).
-    //
-    // Heading close detection: We scan for trailing '=' before newline.
-    // This requires looking ahead: the block parser will handle close
-    // detection properly. Here we emit EQUALS for non-line-start '='.
-    // -----------------------------------------------------------------------
-    if (code === CC_EQUALS) {
-      const start = i;
-      while (i < len && source.charCodeAt(i) === CC_EQUALS) i++;
-      yield tok(TokenType.EQUALS, start, i);
-      continue;
-    }
-
-    // -----------------------------------------------------------------------
-    // Plain text: accumulate everything that isn't a recognized delimiter.
-    //
-    // This is the "fallthrough" path. Characters that don't match any
-    // pattern above are grouped into TEXT tokens. We consume as many
-    // non-special characters as possible in one token to minimize the
-    // total token count and reduce overhead for the block parser.
-    //
-    // The inner loop uses the DELIMITER lookup table. The `c < 128`
-    // guard means non-ASCII characters (CJK, emoji, surrogate halves)
-    // skip the table access entirely — they are never delimiters.
-    // -----------------------------------------------------------------------
-    {
+    if (code >= 128 || !DELIMITER[code]) {
       const start = i;
       i++;
       while (i < len) {
@@ -751,7 +308,474 @@ export function* tokenize(source: TextSource): Generator<Token> {
         if (c < 128 && DELIMITER[c]) break;
         i++;
       }
+      lineStart = false;
       yield tok(TokenType.TEXT, start, i);
+      continue;
+    }
+
+    // -----------------------------------------------------------------------
+    // Delimiter dispatch
+    //
+    // We only reach here when `code` is a known ASCII delimiter. A single
+    // switch replaces the previous chain of top-level `if` statements,
+    // giving the engine a denser dispatch and keeping the code organized
+    // by character.
+    // -----------------------------------------------------------------------
+    switch (code) {
+
+      // --- Newline: \n, \r\n, or bare \r ---
+      case CC_LF:
+      case CC_CR: {
+        const start = i;
+        if (code === CC_CR && i + 1 < len && source.charCodeAt(i + 1) === CC_LF) {
+          i += 2;
+        } else {
+          i += 1;
+        }
+        yield tok(TokenType.NEWLINE, start, i);
+        lineStart = true;
+        continue;
+      }
+
+      // --- Space ---
+      case CC_SPACE: {
+        if (lineStart) {
+          yield tok(TokenType.PREFORMATTED_MARKER, i, i + 1);
+          i += 1;
+          lineStart = false;
+          continue;
+        }
+        const start = i;
+        while (i < len) {
+          const c = source.charCodeAt(i);
+          if (c !== CC_SPACE && c !== CC_TAB) break;
+          i++;
+        }
+        yield tok(TokenType.WHITESPACE, start, i);
+        continue;
+      }
+
+      // --- Tab ---
+      case CC_TAB: {
+        const start = i;
+        while (i < len) {
+          const c = source.charCodeAt(i);
+          if (c !== CC_SPACE && c !== CC_TAB) break;
+          i++;
+        }
+        lineStart = false;
+        yield tok(TokenType.WHITESPACE, start, i);
+        continue;
+      }
+
+      // --- Equals ---
+      case CC_EQUALS: {
+        const wasLineStart = lineStart;
+        const start = i;
+        while (i < len && source.charCodeAt(i) === CC_EQUALS) i++;
+        lineStart = false;
+        yield tok(wasLineStart ? TokenType.HEADING_MARKER : TokenType.EQUALS, start, i);
+        continue;
+      }
+
+      // --- Asterisk (bullet list marker at line start) ---
+      case CC_ASTERISK: {
+        if (lineStart) {
+          yield tok(TokenType.BULLET, i, i + 1);
+          i += 1;
+          // Stay lineStart=true so stacked markers (*#:;) are recognized
+          continue;
+        }
+        // Not at line start: not a delimiter the tokenizer handles as
+        // a special token. CC_ASTERISK is in the DELIMITER table only
+        // because it matters at line start and as part of bold/italic
+        // disambiguation. Mid-line bare '*' is plain text.
+        yield tok(TokenType.TEXT, i, i + 1);
+        i += 1;
+        lineStart = false;
+        continue;
+      }
+
+      // --- Hash (ordered list marker at line start) ---
+      case CC_HASH: {
+        if (lineStart) {
+          yield tok(TokenType.HASH, i, i + 1);
+          i += 1;
+          continue;
+        }
+        yield tok(TokenType.TEXT, i, i + 1);
+        i += 1;
+        lineStart = false;
+        continue;
+      }
+
+      // --- Colon (definition list at line start) ---
+      case CC_COLON: {
+        if (lineStart) {
+          yield tok(TokenType.COLON, i, i + 1);
+          i += 1;
+          continue;
+        }
+        yield tok(TokenType.TEXT, i, i + 1);
+        i += 1;
+        lineStart = false;
+        continue;
+      }
+
+      // --- Semicolon (definition term at line start) ---
+      case CC_SEMICOLON: {
+        if (lineStart) {
+          yield tok(TokenType.SEMICOLON, i, i + 1);
+          i += 1;
+          continue;
+        }
+        yield tok(TokenType.TEXT, i, i + 1);
+        i += 1;
+        lineStart = false;
+        continue;
+      }
+
+      // --- Dash (thematic break at line start) ---
+      case CC_DASH: {
+        if (lineStart) {
+          const start = i;
+          while (i < len && source.charCodeAt(i) === CC_DASH) i++;
+          lineStart = false;
+          if (i - start >= 4) {
+            yield tok(TokenType.THEMATIC_BREAK, start, i);
+          } else {
+            yield tok(TokenType.TEXT, start, i);
+          }
+          continue;
+        }
+        yield tok(TokenType.TEXT, i, i + 1);
+        i += 1;
+        lineStart = false;
+        continue;
+      }
+
+      // --- Bang: '!' at line start, '!!' inline ---
+      case CC_BANG: {
+        if (lineStart) {
+          yield tok(TokenType.TABLE_HEADER_CELL, i, i + 1);
+          i += 1;
+          lineStart = false;
+          continue;
+        }
+        if (i + 1 < len && source.charCodeAt(i + 1) === CC_BANG) {
+          yield tok(TokenType.DOUBLE_BANG, i, i + 2);
+          i += 2;
+          lineStart = false;
+          continue;
+        }
+        yield tok(TokenType.TEXT, i, i + 1);
+        i += 1;
+        lineStart = false;
+        continue;
+      }
+
+      // --- Less-than: comments and HTML tags ---
+      case CC_LT: {
+        // <!-- comment -->
+        if (i + 3 < len &&
+          source.charCodeAt(i + 1) === CC_BANG &&
+          source.charCodeAt(i + 2) === CC_DASH &&
+          source.charCodeAt(i + 3) === CC_DASH) {
+          yield tok(TokenType.COMMENT_OPEN, i, i + 4);
+          i += 4;
+          const contentStart = i;
+          let found = false;
+          while (i < len) {
+            if (source.charCodeAt(i) === CC_DASH &&
+              i + 2 < len &&
+              source.charCodeAt(i + 1) === CC_DASH &&
+              source.charCodeAt(i + 2) === CC_GT) {
+              if (i > contentStart) {
+                yield tok(TokenType.TEXT, contentStart, i);
+              }
+              yield tok(TokenType.COMMENT_CLOSE, i, i + 3);
+              i += 3;
+              found = true;
+              break;
+            }
+            i++;
+          }
+          if (!found && i > contentStart) {
+            yield tok(TokenType.TEXT, contentStart, i);
+          }
+          lineStart = false;
+          continue;
+        }
+        // </ closing tag
+        if (i + 1 < len && source.charCodeAt(i + 1) === CC_SLASH) {
+          yield tok(TokenType.CLOSING_TAG_OPEN, i, i + 2);
+          i += 2;
+          lineStart = false;
+          continue;
+        }
+        // <tag opening tag
+        if (i + 1 < len && isAsciiLetter(source.charCodeAt(i + 1))) {
+          yield tok(TokenType.TAG_OPEN, i, i + 1);
+          i += 1;
+          lineStart = false;
+          continue;
+        }
+        // Bare '<': plain text
+        yield tok(TokenType.TEXT, i, i + 1);
+        i += 1;
+        lineStart = false;
+        continue;
+      }
+
+      // --- Greater-than: tag close ---
+      case CC_GT: {
+        yield tok(TokenType.TAG_CLOSE, i, i + 1);
+        i += 1;
+        lineStart = false;
+        continue;
+      }
+
+      // --- Slash: '/>' self-closing tag end ---
+      case CC_SLASH: {
+        if (i + 1 < len && source.charCodeAt(i + 1) === CC_GT) {
+          yield tok(TokenType.SELF_CLOSING_TAG_END, i, i + 2);
+          i += 2;
+          lineStart = false;
+          continue;
+        }
+        yield tok(TokenType.TEXT, i, i + 1);
+        i += 1;
+        lineStart = false;
+        continue;
+      }
+
+      // --- Ampersand: HTML entities ---
+      case CC_AMP: {
+        const start = i;
+        let j = i + 1;
+        if (j < len) {
+          const next = source.charCodeAt(j);
+          // Numeric entity
+          if (next === CC_HASH) {
+            j++;
+            if (j < len && (source.charCodeAt(j) === 0x78 || source.charCodeAt(j) === 0x58)) {
+              // &#x hex
+              j++;
+              const hexStart = j;
+              while (j < len && isHexDigit(source.charCodeAt(j))) j++;
+              if (j > hexStart && j < len && source.charCodeAt(j) === CC_SEMICOLON) {
+                j++;
+                yield tok(TokenType.HTML_ENTITY, start, j);
+                i = j;
+                lineStart = false;
+                continue;
+              }
+            } else {
+              // &#decimal
+              const decStart = j;
+              while (j < len && isAsciiDigit(source.charCodeAt(j))) j++;
+              if (j > decStart && j < len && source.charCodeAt(j) === CC_SEMICOLON) {
+                j++;
+                yield tok(TokenType.HTML_ENTITY, start, j);
+                i = j;
+                lineStart = false;
+                continue;
+              }
+            }
+          }
+          // Named entity
+          else if (isAsciiLetter(next)) {
+            j++;
+            while (j < len && isAsciiAlphanumeric(source.charCodeAt(j))) j++;
+            if (j < len && source.charCodeAt(j) === CC_SEMICOLON) {
+              j++;
+              yield tok(TokenType.HTML_ENTITY, start, j);
+              i = j;
+              lineStart = false;
+              continue;
+            }
+          }
+        }
+        yield tok(TokenType.TEXT, i, i + 1);
+        i += 1;
+        lineStart = false;
+        continue;
+      }
+
+      // --- Open brace: {| table open, {{{ argument, {{ template ---
+      case CC_OPEN_BRACE: {
+        if (lineStart && i + 1 < len && source.charCodeAt(i + 1) === CC_PIPE) {
+          yield tok(TokenType.TABLE_OPEN, i, i + 2);
+          i += 2;
+          lineStart = false;
+          continue;
+        }
+        if (i + 2 < len &&
+          source.charCodeAt(i + 1) === CC_OPEN_BRACE &&
+          source.charCodeAt(i + 2) === CC_OPEN_BRACE) {
+          yield tok(TokenType.ARGUMENT_OPEN, i, i + 3);
+          i += 3;
+          lineStart = false;
+          continue;
+        }
+        if (i + 1 < len && source.charCodeAt(i + 1) === CC_OPEN_BRACE) {
+          yield tok(TokenType.TEMPLATE_OPEN, i, i + 2);
+          i += 2;
+          lineStart = false;
+          continue;
+        }
+        yield tok(TokenType.TEXT, i, i + 1);
+        i += 1;
+        lineStart = false;
+        continue;
+      }
+
+      // --- Close brace: }}} argument, }} template ---
+      case CC_CLOSE_BRACE: {
+        if (i + 2 < len &&
+          source.charCodeAt(i + 1) === CC_CLOSE_BRACE &&
+          source.charCodeAt(i + 2) === CC_CLOSE_BRACE) {
+          yield tok(TokenType.ARGUMENT_CLOSE, i, i + 3);
+          i += 3;
+          lineStart = false;
+          continue;
+        }
+        if (i + 1 < len && source.charCodeAt(i + 1) === CC_CLOSE_BRACE) {
+          yield tok(TokenType.TEMPLATE_CLOSE, i, i + 2);
+          i += 2;
+          lineStart = false;
+          continue;
+        }
+        yield tok(TokenType.TEXT, i, i + 1);
+        i += 1;
+        lineStart = false;
+        continue;
+      }
+
+      // --- Open bracket: [[ wikilink, [ ext link ---
+      case CC_OPEN_BRACKET: {
+        if (i + 1 < len && source.charCodeAt(i + 1) === CC_OPEN_BRACKET) {
+          yield tok(TokenType.LINK_OPEN, i, i + 2);
+          i += 2;
+        } else {
+          yield tok(TokenType.EXT_LINK_OPEN, i, i + 1);
+          i += 1;
+        }
+        lineStart = false;
+        continue;
+      }
+
+      // --- Close bracket: ]] wikilink, ] ext link ---
+      case CC_CLOSE_BRACKET: {
+        if (i + 1 < len && source.charCodeAt(i + 1) === CC_CLOSE_BRACKET) {
+          yield tok(TokenType.LINK_CLOSE, i, i + 2);
+          i += 2;
+        } else {
+          yield tok(TokenType.EXT_LINK_CLOSE, i, i + 1);
+          i += 1;
+        }
+        lineStart = false;
+        continue;
+      }
+
+      // --- Pipe: table markup at line start, || and | inline ---
+      case CC_PIPE: {
+        if (lineStart) {
+          if (i + 1 < len && source.charCodeAt(i + 1) === CC_CLOSE_BRACE) {
+            yield tok(TokenType.TABLE_CLOSE, i, i + 2);
+            i += 2;
+            lineStart = false;
+            continue;
+          }
+          if (i + 1 < len && source.charCodeAt(i + 1) === CC_DASH) {
+            yield tok(TokenType.TABLE_ROW, i, i + 2);
+            i += 2;
+            lineStart = false;
+            continue;
+          }
+          if (i + 1 < len && source.charCodeAt(i + 1) === 0x2b) {
+            yield tok(TokenType.TABLE_CAPTION, i, i + 2);
+            i += 2;
+            lineStart = false;
+            continue;
+          }
+          yield tok(TokenType.PIPE, i, i + 1);
+          i += 1;
+          lineStart = false;
+          continue;
+        }
+        if (i + 1 < len && source.charCodeAt(i + 1) === CC_PIPE) {
+          yield tok(TokenType.DOUBLE_PIPE, i, i + 2);
+          i += 2;
+        } else {
+          yield tok(TokenType.PIPE, i, i + 1);
+          i += 1;
+        }
+        lineStart = false;
+        continue;
+      }
+
+      // --- Apostrophe: bold/italic runs ---
+      case CC_APOSTROPHE: {
+        const start = i;
+        while (i < len && source.charCodeAt(i) === CC_APOSTROPHE) i++;
+        if (i - start >= 2) {
+          yield tok(TokenType.APOSTROPHE_RUN, start, i);
+        } else {
+          yield tok(TokenType.TEXT, start, i);
+        }
+        lineStart = false;
+        continue;
+      }
+
+      // --- Tilde: signature runs ---
+      case CC_TILDE: {
+        const start = i;
+        while (i < len && source.charCodeAt(i) === CC_TILDE) i++;
+        const runLen = i - start;
+        if (runLen >= 3 && runLen <= 5) {
+          yield tok(TokenType.SIGNATURE, start, i);
+        } else {
+          yield tok(TokenType.TEXT, start, i);
+        }
+        lineStart = false;
+        continue;
+      }
+
+      // --- Underscore: behavior switches __WORD__ ---
+      case CC_UNDERSCORE: {
+        if (i + 1 < len && source.charCodeAt(i + 1) === CC_UNDERSCORE) {
+          const start = i;
+          let j = i + 2;
+          while (j < len && isAsciiLetter(source.charCodeAt(j))) j++;
+          if (j + 1 < len &&
+            source.charCodeAt(j) === CC_UNDERSCORE &&
+            source.charCodeAt(j + 1) === CC_UNDERSCORE) {
+            if (isBehaviorSwitchWord(source, i + 2, j)) {
+              yield tok(TokenType.BEHAVIOR_SWITCH, start, j + 2);
+              i = j + 2;
+              lineStart = false;
+              continue;
+            }
+          }
+          yield tok(TokenType.TEXT, i, i + 2);
+          i += 2;
+          lineStart = false;
+          continue;
+        }
+        yield tok(TokenType.TEXT, i, i + 1);
+        i += 1;
+        lineStart = false;
+        continue;
+      }
+
+      // --- Fallback: any delimiter char not handled above ---
+      default: {
+        yield tok(TokenType.TEXT, i, i + 1);
+        i += 1;
+        lineStart = false;
+        continue;
+      }
     }
   }
 
