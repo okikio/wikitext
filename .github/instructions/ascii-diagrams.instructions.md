@@ -1,148 +1,63 @@
 ---
-description: ASCII diagram conventions for this repo
-applyTo: "**/*.ts,**/*.md"
+description: ASCII diagram guidance for docs, TSDoc, and explanatory comments
+applyTo: "**/*.md,**/*.ts,**/*.tsx"
 ---
 
 # ASCII Diagrams
 
-Use ASCII diagrams to make complex systems, data flows, and algorithms visually
-understandable. Diagrams should clarify, not decorate.
+Use ASCII diagrams when prose alone would make structure, flow, hierarchy, or
+state harder to understand.
 
-## When to Use
+Good uses:
+- parser pipelines
+- tree and hierarchy layouts
+- state transitions
+- binary or memory layouts
+- algorithm walkthroughs
+- edit or event flow
 
-- Data flow between components or services
-- State machines and transitions
-- Algorithm steps and decision trees
-- Memory layouts and binary structures
-- Request/response lifecycles
-- Tree structures and hierarchies
+Do not add diagrams for simple one-step logic or tiny APIs.
 
-## Style
+Always pair a diagram with prose that explains:
+- what the reader is looking at
+- why it matters
+- how to read it
 
-Keep diagrams simple and readable in monospace fonts. Use box-drawing characters
-for clean lines:
+## Common diagram shapes
 
-```
-┌──────┐  ─  │  ┐  └  ┘  ├  ┤  ┬  ┴  ┼
-│      │
-└──────┘
-```
+### Pipeline or flow
 
-Or stick with ASCII when portability matters:
-
-```
-+------+  -  |  +
-|      |
-+------+
+```text
+TextSource ─► Tokenizer ─► Event Stream ─► buildTree()
 ```
 
-## Examples
+### Tree or hierarchy
 
-**Data flow:**
-
-```
-Request
-   │
-   ▼
-┌─────────┐    ┌────────────┐    ┌──────────┐
-│  Auth   │───▶│ Validation │───▶│ Handler  │
-└─────────┘    └────────────┘    └──────────┘
-                                      │
-                                      ▼
-                                 ┌──────────┐
-                                 │ Response │
-                                 └──────────┘
+```text
+root/
+├── core/
+│   ├── tokenizer.ts
+│   └── events.ts
+└── ast/
+    └── builder.ts
 ```
 
-**State machine:**
+### Binary or field layout
 
-```
-          start
-             │
-             ▼
-        ┌────────┐
-   ┌───▶│  Idle  │◀──────┐
-   │    └────────┘       │
-   │         │           │
-   │    submit()      cancel()
-   │         │           │
-   │         ▼           │
-   │    ┌────────┐       │
-done()  │Loading │───────┤
-   │    └────────┘       │
-   │         │        error()
-   │      success        │
-   │         │           │
-   │         ▼           ▼
-   │    ┌────────┐  ┌────────┐
-   └────│Success │  │ Error  │
-        └────────┘  └────────┘
-```
-
-**Binary layout:**
-
-```
+```text
 Byte:    0       1       2       3
        ┌───────┬───────┬───────────────┐
        │ Flags │ Type  │    Length     │
-       │ 8-bit │ 8-bit │    16-bit     │
        └───────┴───────┴───────────────┘
-         0xFF    0x01      0x00 0x20
-
-Flags breakdown:
-  Bit 7: Reserved
-  Bit 6: Compressed
-  Bit 5: Encrypted
-  Bits 0-4: Version
 ```
 
-**Tree/hierarchy:**
+### Step-by-step algorithm view
 
-```
-root/
-├── core/
-│   ├── build.ts
-│   ├── context.ts
-│   └── plugins/
-│       ├── cdn.ts
-│       └── http.ts
-├── edge/
-│   └── endpoints/
-└── utils/
-    └── mod.ts
+```text
+Step 1: tokenize input
+Step 2: group tokens into block structure
+Step 3: resolve inline structure
+Step 4: emit enter/exit/text events
 ```
 
-**Algorithm steps:**
-
-```
-Input: [3, 1, 4, 1, 5, 9, 2, 6]
-
-Step 1: Split
-        [3, 1, 4, 1]  [5, 9, 2, 6]
-
-Step 2: Split again
-        [3, 1] [4, 1]  [5, 9] [2, 6]
-
-Step 3: Split to singles
-        [3] [1] [4] [1]  [5] [9] [2] [6]
-
-Step 4: Merge pairs (sorted)
-        [1, 3] [1, 4]  [5, 9] [2, 6]
-
-Step 5: Merge quads
-        [1, 1, 3, 4]  [2, 5, 6, 9]
-
-Step 6: Final merge
-        [1, 1, 2, 3, 4, 5, 6, 9]
-```
-
-## Placement
-
-Put diagrams in:
-
-- TSDoc comments above functions/classes
-- README sections explaining architecture
-- Inline comments for complex algorithms
-
-Always accompany diagrams with prose that explains what the reader is looking
-at.
+Prefer diagrams that stay readable in plain text editors and code review diffs.

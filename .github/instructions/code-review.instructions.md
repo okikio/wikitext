@@ -5,49 +5,86 @@ applyTo: "**"
 
 # Code Review
 
+Apply these rules only when:
+- reviewing a diff
+- generating review comments
+- summarizing review findings
+- evaluating correctness, risk, or maintainability of a change
+
+Do not apply these rules to ordinary coding, docs writing, or commit/PR authoring
+unless the task is explicitly a review.
+
+## Review priorities
+
 Prioritize correctness, clarity, maintainability, and standards alignment.
-Avoid noise: fewer, higher-signal comments.
 
-## Review rubric (in order)
+Prefer fewer, higher-signal comments over noisy review spam.
 
-### 1. Correctness & contracts
+## Review order
 
-- Does the code do what it claims?
-- Are edge cases handled (empty string, single line, mixed line endings, all
-  whitespace, no indentation)?
-- Are public API contracts consistent across call site and implementation?
+### 1. Correctness and contracts
 
-### 2. Failure modes & safety
+Check:
+- does the code do what it claims
+- are edge cases handled
+- are public contracts consistent across implementation and usage
 
-- Are errors explicit? No silent fallbacks or implicit coercions.
-- Any unsafe patterns (eval, unvalidated inputs, string-built operations)?
-- Does the change affect `deno doc --lint` compliance?
+### 2. Failure modes and safety
 
-### 3. Types & narrowing
+Check:
+- are errors explicit
+- are trust boundaries clear
+- are unsafe patterns introduced
+- are inputs validated at boundaries
+- does the change introduce hidden assumptions
+- does the change affect `deno doc --lint` compliance
 
-- Avoid `any`. Prefer generics, unions, discriminated unions, and narrowing.
-- Every type referenced in a public signature must itself be exported:
-  `deno doc --lint` will catch `private-type-ref` errors.
-- Return types at module boundaries should be explicit and narrow.
+### 3. Types and narrowing
 
-### 4. Readability & educational clarity
+Check:
+- avoid `any`
+- use unions, generics, and narrowing where appropriate
+- public signatures only reference exported public types
+- return types are explicit and narrow at module boundaries
 
-- Naming should be approachable and intent-revealing. See naming rules in
-  `copilot-instructions.md`.
-- Comments should explain _why_. For non-obvious logic (regex, bitwise, tricky
-  boolean), also explain _what/how_ in plain English.
-- If the change's intent isn't obvious from the diff, suggest improving:
-  - naming and/or docstrings
-  - OR the PR description to clearly state motivation and impact
+### 4. Readability and educational clarity
 
-### 5. Consistency & style
+Check:
+- names reveal intent
+- non-obvious or complex logic is explained
+- comments explain why, and when needed what or how
+- the diff is understandable without guessing the motivation
 
-Match repo formatting and import conventions. See `typescript.instructions.md`.
+If the code is correct but its purpose is hard to infer, suggest improving:
+- naming
+- docstrings
+- PR description
+- examples
+- diagrams
 
-## Output format
+### 5. Consistency and style
 
-Use tags: `[BLOCKER]`, `[IMPORTANT]`, `[SUGGESTION]`, `[NIT]`
+Check:
+- formatting matches the repo
+- import structure matches the repo
+- public docs follow the repo rules
+- tests and benchmarks follow the repo rules where applicable
 
-- Provide a concrete fix suggestion for every `[BLOCKER]` and `[IMPORTANT]`.
-- Avoid generic feedback like "improve quality": tie every comment to a
-  specific behavior, risk, or readability issue.
+## Review output tags
+
+Use:
+- `[BLOCKER]`
+- `[IMPORTANT]`
+- `[SUGGESTION]`
+- `[NIT]`
+
+For every `[BLOCKER]` or `[IMPORTANT]`, provide a concrete fix suggestion.
+
+Do not leave vague comments such as `improve quality` or `clean this up`.
+
+Tie every comment to:
+- a concrete risk
+- a broken contract
+- a correctness concern
+- a readability problem
+- or a standards mismatch

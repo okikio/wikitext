@@ -1,65 +1,138 @@
 ---
-description: PR title, description, and design doc standards for this repo
+description: PR title, description, and design note standards for this repo
 applyTo: "**"
 ---
 
 # Pull Requests
 
+Apply these rules only when drafting or revising:
+- PR titles
+- PR descriptions
+- merge summaries
+- reviewer-facing change explanations
+
+Do not apply these rules to normal code comments, TSDoc, design docs, or commit
+messages unless the task is specifically about a pull request.
+
 ## Title
 
-Use Conventional Commit style: `type(scope optional): outcome`
+Use a concise, outcome-focused title.
 
-- Prefer outcome-focused summaries ("prevent double-stripping on nested undent
-  calls")
-- Avoid vague titles ("update mod.ts", "misc fixes")
-- The title must describe an observable outcome (behavior, contract, or
-  workflow), not "add guidelines / improve quality"
-- See `changelog-commits.instructions.md` for type/scope/breaking-change rules
+Conventional Commit style is preferred:
+
+```text
+type(scope optional): outcome
+```
+
+The title must describe an observable outcome, not a vague intention.
+
+Good:
+
+* `fix: prevent double-stripping on nested undent calls`
+
+Weak:
+
+* `chore: improve quality`
+* `fix: update parser`
 
 ## Description
 
-Write for reviewers and future archaeology. Be concrete.
+Use this structure when relevant:
 
-**Summary**: 1–3 bullets: what changed and in which module/function.
-No generic goals like "improve quality" unless tied to a specific behavior
-change.
+* Summary
+* Problem or motivation
+* Solution
+* Behavior changes
+* Verification
+* Risk and rollout
 
-**Problem / Motivation**: the real issue. Anchor it: "Before, X happened…" /
-"Callers couldn't…" / "The output was wrong when…"
+Not every PR needs every section. Prefer relevance over template ritual.
 
-**Solution**: what changed at a high level and where (files/functions).
+### Writing rules
 
-**Behavior changes**: if anything observable changes, list it plainly:
+- Write for reviewers and future archaeology.
+- Lead with what changed and why it matters.
+- Explain the problem before deep implementation detail.
+- Call out observable behavior changes plainly.
+- List real verification steps only.
+- State risks or follow-up work when they matter.
 
-- output shape changes
-- edge case handling changes
-- breaking API changes (see `changelog-commits.instructions.md`)
-- performance / allocation changes
+## Summary
 
-**Verification**: list `deno task test` and `deno doc --lint mod.ts`, plus any
-manual checks. If not verified, say "Should verify by…"; don't claim you ran
-them.
+Use 1 to 3 bullets that state what changed and where.
 
-**Risk & rollout** (when relevant): what could break, edge cases, mitigations.
+Avoid generic claims such as `improve quality` unless tied to a concrete behavior change.
 
-## Writing constraints
+## Problem or motivation
 
-- Short bullets and concrete nouns.
-- Avoid memo-speak ("enhance process", "ensure quality", "various aspects").
-- Do not invent issue numbers, links, or test results.
+Anchor the real issue in user-visible or caller-visible terms.
 
-## Design docs and specs
+Prefer:
 
-When a PR introduces a non-trivial behavioral change or a new public API,
-include a design note using RFC structure:
+* before this change, X happened
+* callers could not do Y
+* output was wrong when Z
 
-1. **Problem**: what is broken or missing
-2. **Goals / Non-goals**: scope and explicit exclusions
-3. **Constraints**: runtime, compatibility, performance, security
-4. **Proposal**: the approach, with ASCII diagrams if helpful
-5. **Alternatives considered**: why not the other options
-6. **Edge cases & failure modes**
-7. **Open questions**
+## Solution
 
-Prefer concrete examples over abstract statements. Call out trade-offs
-explicitly. Keep decision points obvious so reviewers can challenge them.
+Explain the high-level change and where it lives.
+
+Do not bury the reviewer in implementation trivia before they understand the intent.
+
+## Behavior changes
+
+Call out any observable change plainly:
+
+* output shape
+* recovery behavior
+* API behavior
+* edge case handling
+* performance characteristics
+* allocation behavior
+
+## Verification
+
+List real verification steps.
+
+Examples:
+
+* `deno task test`
+* `deno task bench`
+* `deno doc --lint mod.ts`
+* manual scenarios that were checked
+
+Do not claim you ran checks you did not run.
+
+## Risk and rollout
+
+When relevant, state:
+
+* what could break
+* which edge cases deserve attention
+* what mitigates the risk
+* whether follow-up work is expected
+
+## Design notes and specs
+
+When a PR introduces a non-trivial behavioral change or a new public API, include a design note with this shape:
+
+1. Problem
+2. Goals
+3. Non-goals
+4. Constraints
+5. Proposal
+6. Alternatives considered
+7. Edge cases and failure modes
+8. Open questions
+
+Prefer concrete examples over abstract claims.
+
+## Anti-patterns
+
+* Use short bullets and concrete nouns.
+* Avoid memo-speak and filler business language such as `improve quality`.
+* Implementation trivia before the reader understands the problem
+* Long PR prose with no clear behavior change
+* Generic summaries that force reviewers to infer the point
+* Do not invent issue numbers, links, or verification results.
+* Make decision points obvious so reviewers can challenge them.

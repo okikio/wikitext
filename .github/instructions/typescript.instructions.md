@@ -1,145 +1,139 @@
 ---
-description: Deno + TS standards for this repo
+description: Deno + TypeScript standards for this repo
 applyTo: "**/*.ts,**/*.tsx"
 ---
 
 # TypeScript / Deno Rules
 
-## Runtime + module model
+## Runtime and module model
 
-- Assume Deno v2 + strict TypeScript + ESM.
-- Keep modules tree-shakeable:
-  - avoid top-level side effects unless clearly required,
-  - avoid hidden global state,
-  - avoid surprising initialization on import.
+- Assume Deno v2, strict TypeScript, and ESM.
+- Keep modules tree-shakeable.
+- Avoid top-level side effects unless they are clearly required.
+- Avoid hidden global state.
+- Avoid surprising initialization during import.
 
-## Formatting (match repo)
+## Formatting
 
-- Single quotes for strings.
-- Tabs for indentation (2-wide feel).
-- Opening braces on the same line as declarations.
+- Use single quotes for strings.
+- Use tabs with a 2-space feel.
+- Keep opening braces on the same line as declarations.
 
 ## Imports
 
-- Separate type imports from value imports using `import type { ... }`.
-- Use explicit file extensions as the codebase does.
-- Group imports by role and purpose, in this order:
+- Separate type imports from value imports with `import type`.
+- Use explicit file extensions.
+- Group imports by role in this order:
   1. types
-  2. framework/runtime (stdlib/external)
-  3. shared/internal modules
+  2. runtime or external dependencies
+  3. shared internal modules
   4. local modules
 
-## Export style
+## API and type design
 
-- Prefer `function` for exported functions (avoid exporting arrow functions).
-- Avoid currying.
-- Avoid defining functions inside other functions unless there is a strong local
-  reason.
-  - If nested functions are required (callbacks/hooks), keep them small and name
-    them when helpful.
-
-## Types + API design
-
-- Avoid `any`. Prefer generics, unions, discriminated unions, and narrowing.
-- Avoid `enum` in favor of `const`-based literals (`as const`) + union types.
-  - Prefer this pattern:
-
-    ```ts
-    export const TOKEN_KIND = {
-    	TEXT: 'TEXT',
-    	HEADING: 'HEADING',
-    } as const;
-
-    export type TokenKind = typeof TOKEN_KIND[keyof typeof TOKEN_KIND];
-    ```
-  - Constant/enum keys and values can use UPPER_SNAKE_CASE, snake_case, kebab-case, and PascalCase (e.g.,
-    `TokenType.HEADING_MARKER` → `'HEADING_MARKER'`).
-- For AST node type discriminant strings (the `type`/`kind` field in interfaces/objects),
-  prefer `kebab-case` (e.g., `'thematic-break'`, `'list-item'`,
-  `'external-link'`). Single-word types stay lowercase (e.g., `'heading'`,
-  `'table'`).
-- For object and interface property keys in public interfaces, prefer `snake_case` over
-  `camelCase` (e.g., `node_type`, `start_offset`, `sort_key`, `tag_name`,
-  `self_closing`).
-  - Keep existing public keys stable unless a migration is explicitly approved.
-- Prefer `Iterable` / `AsyncIterable` in public APIs over arrays unless there’s
-  a clear reason (performance counts as a valid reason).
-- Prefer `Object.assign(...)` over object spread for object copying/merging.
 - Prefer explicit, narrow return types at module boundaries.
+- Prefer `Iterable` and `AsyncIterable` in public APIs over arrays unless arrays are clearly the better fit.
+- Avoid `any`. Prefer unions, generics, discriminated unions, and narrowing.
+- Keep public keys stable unless an explicit migration is approved.
 
-### Wikist type naming conventions
+## Naming conventions
 
-| Category       | Pattern              | Examples                                                    |
-| -------------- | -------------------- | ----------------------------------------------------------- |
-| AST nodes      | `Wikist*`            | `WikistRoot`, `WikistNode`, `WikistParent`, `WikistLiteral` |
-| Concrete nodes | PascalCase noun      | `Heading`, `Template`, `Wikilink`, `TableCell`              |
-| Events         | `*Event`             | `WikitextEvent`, `EnterEvent`, `ExitEvent`, `TextEvent`     |
-| Tokens         | `Token`, `TokenType` | `Token`, `TokenType.HEADING_MARKER` (value: `'HEADING_MARKER'`)      |
-| Type guards    | `is*()`              | `isHeading()`, `isTemplate()`, `isParent()`                         |
-| Builders       | camelCase noun       | `heading(level, children)`, `text(value)`                           |
+- AST node discriminants use `kebab-case`.
+- Single-word discriminants stay lowercase.
+- Public object and interface keys prefer `snake_case`.
+- AST node types use `Wikist*` names.
+- Event types use `*Event`.
+- Type guards use `is*()`.
+- Builder functions use lower camel case nouns.
+
+Examples:
+- `'thematic-break'`
+- `'list-item'`
+- `node_type`
+- `start_offset`
+- `WikistRoot`
+- `TextEvent`
+- `isHeading()`
+- `heading(level, children)`
 
 ## Object copying
 
-- Prefer `Object.assign` over spread for object copying when practical.
-  - Use spread only when it materially improves readability.
+- Prefer `Object.assign(...)` over object spread when practical.
+- Use spread only when it materially improves readability.
 
-## TSDoc quality bar (public surfaces)
+## Public API documentation bar
 
 For every exported function, interface, type alias, and constant:
 
-- Write TSDoc in plain English: explain _why_ it exists, not just _what_ it is.
-  Ground the reasoning in the problem being solved, the approach taken, and the
-  assumptions/edge cases.
-- Every `@example` block must have a descriptive name that clarifies the
-  scenario and behaviour being demonstrated:
+- Write TSDoc in plain English.
+- Explain why it exists, not just what it is.
+- Ground the explanation in the problem being solved, the approach taken, and the assumptions or edge cases.
+- Every field of an exported interface or public type needs its own JSDoc comment.
+- Any type referenced in a public signature must itself be exported.
 
-  ````ts
-  // bad: fails deno doc --lint
-  * @example
-  * ```ts
-  * align("hello");
-  * ```
+For non-trivial public APIs:
 
-  // good: named
-  * @example Aligning a multi-line value at its insertion column
-  * ```ts
-  * align("hello");
-  * ```
-  ````
+- Include at least two examples:
+  - one common path
+  - one edge case or configuration variant
 
-- Include at least two examples for non-trivial APIs:
-  - Example A: common path
-  - Example B: edge case or configuration variant
-- Every field of an exported interface or type needs its own JSDoc comment.
-- Any type referenced in a public function signature or interface must itself be
-  exported: otherwise `deno doc --lint` reports a `private-type-ref` error.
+Every `@example` block must have a descriptive name.
 
-For complex logic, include:
+Good:
+```ts
+/**
+ * @example Aligning a multi-line value at its insertion column
+ * ```ts
+ * align('hello');
+ * ```
+ */
+```
 
-- a docstring summarizing intent, problem, reasoning & logic, purpose +
-  assumptions,
-- a step-by-step algorithm explanation (with a walkthrough of the example
-  inputs/outputs),
-- make clear what abstract technical codes mean, e.g. binary represents
-  character "C" or keycode represents "Enter", etc...,
-- an ASCII diagram if it improves comprehension.
+Bad:
 
-### Validate with deno doc
+````ts
+/**
+ * @example
+ * ```ts
+ * align('hello');
+ * ```
+ */
+```
 
-Run this after any public API or documentation change:
+## Complex logic
+
+When logic is non-obvious, explain it clearly in code comments or TSDoc.
+
+This especially applies to:
+
+* regex-heavy code
+* bitwise or binary logic
+* tricky branching
+* parser recovery logic
+* performance-sensitive code
+
+When needed, include:
+
+* a short explanation of intent
+* the key assumptions
+* a step-by-step walkthrough
+* clarification of abstract codes or markers
+* an ASCII diagram if it materially improves understanding
+
+## Error handling
+
+* The parser never throws on arbitrary input.
+* Malformed input should still produce a valid result with recovery behavior.
+* Prefer typed errors or discriminated union results where appropriate.
+* At system boundaries, validate inputs explicitly.
+* Recovery events may be emitted when that helps consumers reason about malformed input.
+
+## Validation
+
+Run this after public API or documentation changes:
 
 ```bash
 deno doc --lint mod.ts
 ```
 
-This is the source of truth for doc coverage. Fix all reported errors before
-closing a task.
-
-## Error handling
-
-- The parser never throws on any input. Malformed wikitext produces a valid
-  wikist tree with error recovery.
-- Prefer typed errors or discriminated union results when appropriate.
-- Optionally emit `{ type: "error", message, position }` events for recovery
-  points that consumers can log or ignore.
-- At system boundaries (user input, external APIs), validate explicitly.
+Fix all reported issues before considering the work complete.

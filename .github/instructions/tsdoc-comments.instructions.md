@@ -1,0 +1,88 @@
+---
+description: TSDoc and code comment writing style for this repo
+applyTo: "**/*.ts,**/*.tsx"
+---
+
+# TSDoc and Comments
+
+## What comments are for
+
+Comments and TSDoc should explain:
+- intent
+- constraints
+- invariants
+- assumptions
+- edge cases
+- reasoning behind tricky choices
+
+Do not use comments to restate obvious code.
+
+## TSDoc defaults
+
+For public APIs, start with:
+- what this thing is
+- why it exists
+- what problem it solves for the caller
+- what the caller gets from using it
+
+Then explain the high-level approach if the implementation model matters.
+
+Prefer compact, flowing prose unless the API is conceptually deep.
+
+## Section and header discipline in TSDoc
+
+Do not add section headers inside a doc block unless they improve navigation.
+
+A section label must be specific and useful on its own.
+
+Prefer:
+- `Type guards, builders, and structural unions`
+- `Walking the tree to collect text`
+- `Recovery behavior for malformed input`
+
+Avoid:
+- `Overview`
+- `Details`
+- `Usage`
+- `How it works`
+- `How to work with the tree`
+
+If the prose naturally continues the same idea, use a transition sentence instead of a header.
+
+## Complex logic comments
+
+When code is non-obvious, explain it in plain English.
+
+This especially applies to:
+- parser recovery
+- offset math
+- regular expressions
+- binary or bitwise logic
+- state machines
+- performance-sensitive code
+- tricky boolean conditions
+
+When useful, include:
+- the problem being handled
+- the key invariant
+- the step-by-step logic
+- a short example
+- an ASCII diagram if it makes the logic easier to follow
+
+## Examples
+
+Use examples for:
+- public APIs
+- surprising behavior
+- edge cases
+- config-sensitive behavior
+
+Prefer examples that show a real caller scenario, not a toy snippet with no context.
+
+## Anti-patterns
+
+- Do not write essay-length doc blocks for simple APIs.
+- Do not invent generic section labels.
+- Do not restate parameter names without adding meaning.
+- Do not explain obvious syntax while skipping the real reasoning.
+- Do not use comments to compensate for poor naming when renaming would be clearer.
