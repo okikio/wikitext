@@ -237,9 +237,9 @@ A unified plugin pair consists of:
 - A parser plugin: input string → AST
 - A compiler plugin: AST → output string
 
-Phase 8 adds `wikitextParse()` (parser) and `wikitextStringify()` (compiler)
-as unified plugins, plus bridge plugins (`wikistToHast`, `wikistToMdast`)
-for cross-format conversion.
+The unified integration provides `wikitextParse()` (parser) and
+`wikitextStringify()` (compiler) as unified plugins, plus bridge plugins
+(`wikistToHast`, `wikistToMdast`) for cross-format conversion.
 
 [unified]: https://unifiedjs.com
 
@@ -325,8 +325,8 @@ specific MediaWiki version.
 
 The `syntax` profile (MVP default) uses deterministic rules derived from the
 documented wikitext syntax. It produces correct, well-structured trees for all
-standard wikitext constructs. The `mediawiki` profile (Phase 8) adds
-quirk-matching for consumers that need exact rendering parity.
+standard wikitext constructs. The `mediawiki` profile adds quirk-matching
+for consumers that need exact rendering parity.
 
 This separation keeps the core clean and testable while providing a path to
 full compatibility.
@@ -399,8 +399,8 @@ time. MediaWiki's pre-save transform also handles `{{subst:...}}` expansion
 and `{{int:...}}` internalization.
 
 The source parser sees these as literal tilde runs and `{{subst:Template}}`
-respectively. A future `mediawiki` profile phase could model PST as a
-transform pass, but the MVP parser treats them as:
+respectively. A future `mediawiki` profile could model PST as a transform
+pass, but the parser treats them as:
 - `SignatureMarker` node for tilde runs (3–5 tildes at line start or inline)
 - `Template` node for `{{subst:...}}` with a `subst` flag in `data`
 
@@ -429,15 +429,15 @@ profile can use the node type to filter content based on transclusion context.
 
 ## Open questions
 
-These decisions are deferred to later phases when more implementation
-experience is available:
+These decisions are deferred until more implementation experience is
+available:
 
 1. **Exact apostrophe algorithm**: the MediaWiki heuristic has undocumented edge
-   cases. Defer exact matching to Phase 8 `mediawiki` profile.
+   cases. Defer exact matching to the `mediawiki` profile.
 2. **Cross-block template span limits**: how deep should incremental reparsing
    search for a neutral boundary when templates span many blocks?
 3. **Extension tag discovery**: how does the parser learn about new extension
-   tags besides a hardcoded list? Phase 8 `registerTagHandler` addresses this.
+   tags besides a hardcoded list? `registerTagHandler` addresses this.
 4. **Source map granularity**: should source maps track individual characters
    or token-level ranges? Token-level ranges are sufficient for most use cases.
 5. **Anchor abstraction scope**: should the parser own a full anchor lifecycle

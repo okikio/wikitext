@@ -168,23 +168,23 @@ session.events();        // full event stream
 session.outline();       // block-only events (cheap structural overlay)
 session.parse();         // full AST
 
-// Streaming (Phase 6)
+// Streaming
 session.write(chunk);          // append-only streaming input
 session.drainStableEvents();   // stable prefix events only
 
-// Editing (Phase 7)
+// Editing (incremental)
 const result = session.applyChanges(edits);  // incremental reparse
 result.positionMap;   // old-offset → new-offset mapping
 ```
 
-Session is built *on top of* the pipeline, not replacing it. Each phase adds
+Session is built *on top of* the pipeline, not replacing it. Each tier adds
 capability without retroactive redesign:
 
-- **Phase 5**: `createSession(source)` with `.events()`, `.outline()`,
+- **Core**: `createSession(source)` with `.events()`, `.outline()`,
   `.parse()`. Caches the last parse result.
-- **Phase 6**: `.write(chunk)` for append-only streaming,
+- **Streaming**: `.write(chunk)` for append-only streaming,
   `.drainStableEvents()` for stable prefix consumption.
-- **Phase 7**: `.applyChanges(edits)` with incremental reparse, edit
+- **Incremental**: `.applyChanges(edits)` with incremental reparse, edit
   coalescing, and `PositionMap` return.
 
 
@@ -225,7 +225,7 @@ are always replaceable as a unit.
 (Alternative Model B, a "patch stream" where the session emits fine-grained
 insert/delete/replace ops on the previous provisional events, trades consumer
 simplicity for bandwidth efficiency. If Model A proves too expensive for large
-provisional tails, Model B is the fallback. Defer the choice until Phase 6
+provisional tails, Model B is the fallback. Defer the choice until streaming
 implementation.)
 
 This is essential for smooth streaming UIs. Without a stability frontier, each
@@ -331,7 +331,7 @@ line-oriented: the first token(s) of each line determine the block type.
 
 At each block boundary, the parser records a compact **state snapshot**:
 `{ inNowiki, inPre, openTagStack, openTemplateDepth, inTable }`. These
-snapshots enable incremental reparsing (Phase 7) by identifying the nearest
+snapshots enable incremental reparsing by identifying the nearest
 "neutral boundary" (all stacks empty) when an edit occurs.
 
 **Neutral boundary definition**: a neutral boundary is a position where ALL
@@ -341,7 +341,7 @@ of the following tracked parser state is at its default (empty/zero) value:
 - `inTable` = false: not inside `{| ... |}`
 - `openTagStack` = []: no open HTML tags
 - `inNowiki` = false: not inside `<nowiki>` or `<pre>`
-- (Phase 4+) quote state = clean: no unresolved apostrophe runs
+- quote state = clean: no unresolved apostrophe runs
 
 At a neutral boundary, parsing can resume from scratch without inheriting any
 state from prior content. This is what makes incremental reparsing safe:
@@ -382,7 +382,7 @@ produces a tree for any input. Recovery strategies:
 | Mixed/nested list markers | Build deepest sensible nesting |
 
 
-## Incremental reparsing (Phase 7)
+## Incremental reparsing
 
 Goal: reparse only the affected region after an edit.
 
@@ -416,7 +416,7 @@ tiny operations). The return value includes a `PositionMap` that maps
 and comment anchors across edits.
 
 
-## Extension model (Phase 8)
+## Extension model
 
 Extensions do not touch the tokenizer hot loop. The model has two layers:
 
@@ -436,7 +436,7 @@ A profile is a named bundle of feature gates and ambiguity resolution rules.
 Profiles are sugar over the construction-time config, not a separate pipeline.
 
 - `syntax` (default): deterministic structural parse with clean recovery.
-- `mediawiki` (Phase 8): matches MediaWiki's exact parsing behavior for
+- `mediawiki`: matches MediaWiki's exact parsing behavior for
   ambiguous constructs.
 
 
@@ -458,7 +458,7 @@ The target editing model is a hybrid between text-first and block-first:
   `buildTree({ inlineMode: "lazy" })`). `resolveInlines(node)` parses
   on demand.
 - **Reflow must be bounded.** Every keystroke triggers at most a local
-  incremental reparse (Phase 7), not a global re-render. `outlineEvents()` is
+  incremental reparse, not a global re-render. `outlineEvents()` is
   always cheap.
 
 This pattern appears in real systems like Typora, Obsidian Live Preview, and
@@ -494,5 +494,5 @@ Flat files at root alongside `mod.ts`. No `src/` folder.
 | `text_source.ts` | `TextSource` interface and string adapter |
 | `session.ts` | `createSession()` stateful API |
 
-Advanced modules (Phases 6-8): `async_tokenizer.ts`, `push_parser.ts`,
+Advanced modules (planned): `async_tokenizer.ts`, `push_parser.ts`,
 `incremental.ts`, `compile_html.ts`, `extensions.ts`, `unified.ts`.
