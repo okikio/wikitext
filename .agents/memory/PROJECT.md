@@ -16,9 +16,13 @@ interchange format.
 
 ## Key modules
 
-- `ast.ts`: wikist node types (26+), type guards, builders
-- `events.ts`: `WikitextEvent` union, constructors
-- `token.ts`: `Token` interface, `TokenType` enum
+Implemented:
+- `text_source.ts`: `TextSource` interface + `slice()` helper
+- `token.ts`: `TokenType` const-object (40+ types), `Token` interface, `isToken()`
+- `events.ts`: `WikitextEvent` union (5 kinds), constructors, type guards
+- `ast.ts`: 37 wikist node types, type guards, builder functions
+
+Not yet implemented:
 - `tokenizer.ts`: charCodeAt generator-based scanner
 - `block_parser.ts`: block-level event emitter
 - `inline_parser.ts`: inline event enrichment
@@ -26,19 +30,27 @@ interchange format.
 - `tree_builder.ts`: `buildTree(events) → WikistRoot`
 - `stringify.ts`: AST → wikitext (round-trip)
 - `filter.ts`: filter/visit for tree and event streams
+- `session.ts`: stateful Session wrapper (incremental, streaming)
 
 ## Key exports
 
-- **Core API**: `parse()`, `events()`, `outlineEvents()`, `stringify()`
-- **Low-level**: `tokens()`, `buildTree()`, `slice()`
-- **Filtering**: `filter()`, `visit()`, `filterTemplates()`, `filterLinks()`
+Available now:
+- `TextSource`, `slice()` (text_source.ts)
+- `TokenType`, `Token`, `isToken()` (token.ts)
+- `WikitextEvent`, `EnterEvent`, `ExitEvent`, ... + constructors + guards (events.ts)
+- `WikistNode`, `WikistRoot`, 37 node types + type guards + builders (ast.ts)
+
+Not yet implemented:
+- `parse()`, `events()`, `outlineEvents()`, `stringify()`
+- `tokens()`, `buildTree()`
+- `filter()`, `visit()`
 
 ## Architecture
 
 Events, not AST, are the fundamental output. Three streaming modes:
 - `outlineEvents(input)`: block-only, no inline parsing
 - `events(input)`: full enter/exit/text events
-- `parseChunked(chunks)`: progressive completed blocks (async, Phase 6)
+- `parseChunked(chunks)`: progressive completed blocks (async)
 
 ## Parser contracts
 

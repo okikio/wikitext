@@ -2,21 +2,22 @@
 
 ## Current status
 
-- Today's focus: T02.5: Integrate TextSource/Session/stability-frontier into plan and docs
-- Next task: T03 (AST spec + event types + TextSource interface)
+- Foundation types complete and published (text_source.ts, token.ts, events.ts, ast.ts)
+- Educational docs and TSDoc added across all source and test files
+- Next task: T04 (Tokenizer implementation)
 - Blockers: none
 
 ## Completed
 
-- [x] T01: Rewrite copilot instructions and docs config (Phase 0)
+- [x] T01: Rewrite copilot instructions and docs config
   - `.github/copilot-instructions.md` rewritten for wikitext parser
   - `typescript.instructions.md`: added wikist type naming table
   - `testing.instructions.md`: wikitext edge cases, event invariants
   - `benchmarking.instructions.md`: wikitext competitors, benchmark modes
-  - `changelog.md` reset, `readme.md` stub rewrite
+  - `changelog.md` reset, `readme.md` rewritten
   - `scripts/build_npm.ts` updated, `deno.json` publish includes updated
 
-- [x] T02: Update .agents/ files and write docs/ (Phase 0 continued)
+- [x] T02: Update .agents/ files and write docs/
   - `.agents/memory/` core files rewritten (PROJECT, GLOSSARY, CONVENTIONS, INDEX)
   - `.agents/memory/ACTIVE/` files updated (PLAN, TASKS, PROGRESS, RISKS)
   - `.agents/guides/codebase-patterns.md` rewritten
@@ -30,36 +31,46 @@
     hybrid editing design note, PositionMap, Edit interface, range-first events
   - `docs/wikist-spec.md`: reserved Conflict node type
   - `docs/research.md`: added streaming, hybrid editing, collaboration research
-  - `.agents/memory/ACTIVE/` files updated with new phases and risks
-  - `.agents/guides/codebase-patterns.md`: added TextSource and range-first
-    event patterns
   - `.agents/memory/GLOSSARY.md`: new terms (TextSource, Session, stability
     frontier, PositionMap, Conflict node)
-  - `.github/copilot-instructions.md`: updated architecture overview and
-    naming conventions
-  - `.github/instructions/benchmarking.instructions.md`: added live benchmark
-    suites
+
+- [x] T03: Implement AST spec, event types, TextSource, Token
+  - `text_source.ts`: TextSource interface + slice() helper
+  - `token.ts`: TokenType const-object (40+ types), Token interface, isToken()
+  - `events.ts`: Point, Position, 5 event interfaces, constructors, type guards
+  - `ast.ts`: 37 node types, WikistNode union, type guards, builder functions
+  - `mod.ts`: barrel re-exports all public APIs
+  - `mod_test.ts`: smoke tests for exports
+  - `mod_bench.ts`: mitata benchmarks for foundational operations
+  - `mod_memory_test.ts`: memory regression tests
+  - `ast_test.ts`: comprehensive tests (builders, guards, property-based)
+  - Educational TSDoc added across all files with ASCII diagrams
+  - `readme.md`: complete with full API surface, working examples, status table
+  - `deno doc --lint mod.ts` passes
+  - `deno task test` passes
 
 ## Notes for the next agent
 
-- Assumptions made:
+- Conventions:
   - Flat file layout at root (no src/ folder)
-  - "wikist" spec name for the AST
+  - "wikist" spec name for the AST (following mdast/hast/xast)
   - Events-first architecture (not AST-first)
   - Range-first events: text/token events carry offset ranges, not strings
-  - `TextSource` abstraction: defined in Phase 1, `string` satisfies it
-  - Session API: thin stateful wrapper, built on stateless pipeline
-  - Stability frontier: documented now, implemented in Phase 6
-  - `Conflict` type: reserved in wikist union, not implemented in MVP
-  - Anchor API: deferred to Phase 8 or separate package
-  - Syntax-first scope: MediaWiki quirks deferred to Phase 8 profile
-- Files touched:
-  - `.github/copilot-instructions.md`, `.github/instructions/*.md`
-  - `.agents/memory/`, `.agents/guides/`
-  - `changelog.md`, `readme.md`, `scripts/build_npm.ts`, `deno.json`
-  - `docs/architecture.md`, `docs/wikist-spec.md`, `docs/research.md`
-- Verification to run:
-  - `deno task test` (will fail: mod.ts still has old undent code)
-  - `deno doc --lint mod.ts` (will fail until Phase 1 rewrites mod.ts)
-- Old undent files still present (mod.ts, _repl.ts, mod_bench.ts,
-  mod_memory_test.ts): to be rewritten/deleted in Phase 1+
+  - TokenType uses const-object + literal union (not enum)
+  - AST node types use kebab-case discriminants
+  - Event fields use snake_case (node_type, start_offset, etc.)
+  - `TextSource` abstraction: plain `string` satisfies it
+  - Phases are internal planning only: docs say "not yet implemented"
+- What's implemented:
+  - text_source.ts, token.ts, events.ts, ast.ts (all published)
+  - mod.ts re-exports all of the above
+  - Tests: mod_test.ts, ast_test.ts, mod_memory_test.ts
+  - Benchmarks: mod_bench.ts
+- What's NOT implemented yet:
+  - tokenizer.ts, block_parser.ts, inline_parser.ts
+  - parse.ts, tree_builder.ts, stringify.ts, filter.ts
+  - session.ts
+- Verification commands:
+  - `deno task test`
+  - `deno task bench`
+  - `deno doc --lint mod.ts`

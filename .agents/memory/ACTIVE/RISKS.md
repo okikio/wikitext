@@ -2,9 +2,6 @@
 
 ## Known risks
 
-- **Old undent code still in mod.ts**: `mod.ts` still contains the full undent
-  implementation (~1800 lines). Tests and bench files reference undent APIs.
-  These will break until Phase 1 rewrites mod.ts.
 - **Apostrophe run disambiguation**: MediaWiki's apostrophe heuristic for
   bold/italic is complex and under-documented. May need iterative refinement
   against real corpus.

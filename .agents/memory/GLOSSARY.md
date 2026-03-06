@@ -9,7 +9,8 @@
 - **WikitextEvent**: Discriminated union of enter/exit/text/token events.
   The fundamental interchange format of the parser.
 - **Token**: Lowest-level unit from the tokenizer. Carries start/end offsets
-  into the input string (not value strings) and a `TokenType`.
+  into the input string (not value strings) and a `TokenType` discriminant.
+  Defined in `token.ts`.
 - **Event well-formedness**: Every `enter(X)` has a matching `exit(X)` with
   proper nesting (stack discipline). A parser contract.
 - **Never-throw guarantee**: The parser produces a valid tree for any input.

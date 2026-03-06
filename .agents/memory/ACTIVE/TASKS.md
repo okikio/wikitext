@@ -28,20 +28,21 @@ Rules:
     - [x] `docs/wikist-spec.md` written
     - [x] `docs/research.md` written
 
-- [ ] T03: Implement AST spec and event types (Phase 1)
+- [x] T03: Implement AST spec, event types, TextSource, Token
   - Why: Foundation types that all other modules depend on
   - Done when:
-    - [ ] `text_source.ts` defines `TextSource` interface
-    - [ ] `ast.ts` defines all 26+ node types with type guards and builders
-    - [ ] `events.ts` defines range-first `WikitextEvent` union with constructors
-    - [ ] `Conflict` type reserved in union (no guards/builders)
-    - [ ] `deno doc --lint mod.ts` passes
-    - [ ] `deno task test` passes
+    - [x] `text_source.ts` defines `TextSource` interface + `slice()` helper
+    - [x] `token.ts` defines `TokenType` const-object (40+ types), `Token`, `isToken()`
+    - [x] `events.ts` defines range-first `WikitextEvent` union with constructors + guards
+    - [x] `ast.ts` defines 37 node types with type guards and builder functions
+    - [x] `Conflict` type reserved in union (no guards/builders)
+    - [x] `deno doc --lint mod.ts` passes
+    - [x] `deno task test` passes
+    - [x] Educational TSDoc with ASCII diagrams across all files
 
-- [ ] T04: Implement tokenizer (Phase 2)
+- [ ] T04: Implement tokenizer
   - Why: Character-level scanner is the lowest layer
   - Done when:
-    - [ ] `token.ts` defines Token interface and TokenType enum
     - [ ] `tokenizer.ts` is a working generator-based scanner over `TextSource`
     - [ ] Token coverage: every input code unit is covered
     - [ ] Never-throw fuzz check passes

@@ -44,8 +44,8 @@ See `docs/architecture.md` for the full pipeline design. In summary:
 
 - **Phase 0**: Rewrite copilot instructions, docs, build config ✅
 - **Phase 1**: AST spec (`ast.ts`) + event types (`events.ts`) + `TextSource`
-  interface + range-first event payloads
-- **Phase 2**: Tokenizer (`token.ts`, `tokenizer.ts`) over `TextSource`
+  interface + Token types + range-first event payloads ✅
+- **Phase 2**: Tokenizer (`tokenizer.ts`) over `TextSource` ← **next**
 - **Phase 3**: Block parser (`block_parser.ts`) + fuzz start. Session begins
   life here: outline overlay is the first live view.
 - **Phase 4**: Inline parser (`inline_parser.ts`)
