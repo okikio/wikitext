@@ -1,20 +1,54 @@
 /**
  * Event types for the wikitext parser's event stream.
  *
- * Events are the fundamental interchange format of the parser. The event
- * stream represents the same structural information as the AST but
- * without requiring tree allocation upfront. Consumers choose how much
- * structure to materialize: tree, HTML string, filtered subset, or
- * direct callbacks.
+ * Events are the fundamental interchange format of the parser. Rather than
+ * producing an AST as the primary output, the parser emits a flat stream of
+ * events that encode the same structural information. Consumers then choose
+ * how much structure to materialize: a full tree, an HTML string, a filtered
+ * subset, or direct callbacks — all from the same event sequence.
  *
- * Events are **range-first**: text and token events carry offset ranges
- * into the `TextSource`, not allocated strings. A `slice(source, evt)`
- * call resolves the string on demand, matching the offset-based discipline
- * already used by raw tokens.
+ * ## Why events, not just an AST?
  *
- * Enter/exit pairs nest like parentheses. The event stream is always
- * well-formed: every `enter(X)` has a matching `exit(X)`, with proper
- * stack discipline.
+ * An AST requires allocating every node upfront. For large articles (200 KB+),
+ * this is expensive. An event stream is cheaper to produce and lets
+ * consumers bail out early (e.g., "find the first heading and stop"). Events
+ * compose well: you can filter, transform, or pipe them without building
+ * intermediate trees.
+ *
+ * ## How events work
+ *
+ * The event stream uses **enter/exit pairs** with stack discipline, similar
+ * to SAX for XML. For the input `== Hello ==\nText`, the event stream
+ * looks like:
+ *
+ * ```
+ * enter('heading', { level: 2 })   ← open the heading node
+ *   text(3, 8)                     ← "Hello" (offsets, not a string)
+ * exit('heading')                  ← close the heading node
+ * enter('paragraph')               ← open a paragraph
+ *   text(12, 16)                   ← "Text"
+ * exit('paragraph')                ← close the paragraph
+ * ```
+ *
+ * The nesting is always well-formed: every `enter(X)` has a matching
+ * `exit(X)`, and they nest like parentheses. This guarantee means consumers
+ * can track depth with a simple counter or stack.
+ *
+ * Text and token events carry **offset ranges** (start/end integers) into
+ * the source text, not allocated strings. This range-first approach matches
+ * the offset discipline used by raw tokens and avoids per-event string
+ * allocation. When a consumer needs the actual text, it calls
+ * `slice(source, evt.start_offset, evt.end_offset)`.
+ *
+ * The five event kinds are:
+ *
+ * | Kind    | Purpose                                           |
+ * |---------|---------------------------------------------------|
+ * | `enter` | Opens a node (carries node type + properties)     |
+ * | `exit`  | Closes the most recently opened node of that type |
+ * | `text`  | A range of literal text content (offsets)         |
+ * | `token` | A raw tokenizer token exposed in the stream       |
+ * | `error` | Optional recovery event (parser never throws)     |
  *
  * @example Processing a stream of events
  * ```ts
@@ -23,10 +57,10 @@
  * function showEvents(events: Iterable<WikitextEvent>) {
  *   for (const evt of events) {
  *     switch (evt.kind) {
- *       case 'enter': console.log(`open ${evt.nodeType}`); break;
- *       case 'exit':  console.log(`close ${evt.nodeType}`); break;
- *       case 'text':  console.log(`text [${evt.startOffset}..${evt.endOffset})`); break;
- *       case 'token': console.log(`token ${evt.tokenType}`); break;
+ *       case 'enter': console.log(`open ${evt.node_type}`); break;
+ *       case 'exit':  console.log(`close ${evt.node_type}`); break;
+ *       case 'text':  console.log(`text [${evt.start_offset}..${evt.end_offset})`); break;
+ *       case 'token': console.log(`token ${evt.token_type}`); break;
  *     }
  *   }
  * }
@@ -41,7 +75,7 @@
  *   end: { line: 1, column: 14, offset: 13 },
  * });
  * evt.kind;     // 'enter'
- * evt.nodeType; // 'heading'
+ * evt.node_type; // 'heading'
  * evt.props;    // { level: 2 }
  * ```
  *
@@ -58,9 +92,22 @@ export type DiagnosticSeverity = 'error' | 'warning';
 // ---------------------------------------------------------------------------
 // Position types (unist-compatible)
 // ---------------------------------------------------------------------------
+//
+// These types track where each event came from in the original source text.
+// They follow the unist (Universal Syntax Tree) spec used by the unified
+// ecosystem (remark, rehype, etc.), so wikist trees are compatible with
+// unist utilities like `unist-util-position`.
+//
+// All measurements use UTF-16 code units — the native string indexing of
+// JavaScript. This matches the Language Server Protocol (LSP), which also
+// uses UTF-16 positions. No conversion needed when integrating with editors
+// like VS Code.
 
 /**
  * A specific location in a source file.
+ *
+ * Think of it as a cursor position: which line, which column, and the
+ * absolute character offset from the start of the file.
  *
  * All fields use UTF-16 code unit measurements, matching JS string indexing
  * and LSP's mandatory `utf-16` position encoding.
@@ -87,19 +134,34 @@ export interface Position {
 // ---------------------------------------------------------------------------
 // Event variants
 // ---------------------------------------------------------------------------
+//
+// The five event kinds form a discriminated union on the `kind` field.
+// Consumers switch on `evt.kind` for exhaustive handling:
+//
+//   enter  → a node is opening (carries type + properties)
+//   exit   → the most recently opened node of that type is closing
+//   text   → a range of literal text (offsets into the source)
+//   token  → a raw tokenizer token surfaced in the event stream
+//   error  → a recovery point (the parser never throws)
+//
+// Enter/exit pairs always nest properly. If you see:
+//   enter('bold') → enter('italic') → exit('italic') → exit('bold')
+// the nesting is correct. You will never see exit('bold') before
+// exit('italic') — that would break stack discipline.
 
 /**
  * Signals that a node of the given type is being opened.
  *
- * Every `EnterEvent` will have a matching `ExitEvent` with the same
- * `nodeType`, forming a well-nested stack. `props` carries node-specific
- * fields (e.g., `{ level: 2 }` for a heading).
+ * Every `EnterEvent` will have a matching {@linkcode ExitEvent} with the same
+ * `node_type`, forming a well-nested stack. `props` carries node-specific
+ * fields (e.g., `{ level: 2 }` for a heading, `{ ordered: true }` for a
+ * list).
  */
 export interface EnterEvent {
   /** Discriminant for the event union. */
   readonly kind: 'enter';
   /** The AST node type being opened (e.g., `'heading'`, `'template'`). */
-  readonly nodeType: string;
+  readonly node_type: string;
   /**
    * Node-specific properties attached at open time.
    *
@@ -120,25 +182,32 @@ export interface ExitEvent {
   /** Discriminant for the event union. */
   readonly kind: 'exit';
   /** The AST node type being closed. */
-  readonly nodeType: string;
+  readonly node_type: string;
   /** Source range of the closing delimiter / boundary. */
   readonly position: Position;
 }
 
 /**
  * A range of literal text content, expressed as offsets into the
- * `TextSource`. Consumers call `slice(source, evt.startOffset, evt.endOffset)`
- * to resolve the string value on demand. This avoids per-event string
- * allocation and prevents memory retention hazards from keeping substrings
- * alive.
+ * {@linkcode TextSource}.
+ *
+ * The event does not carry the text string itself: only the start and end
+ * offsets. Consumers call `slice(source, evt.start_offset, evt.end_offset)`
+ * to resolve the string value on demand. This range-first design avoids
+ * per-event string allocation and prevents memory retention hazards from
+ * keeping substrings alive.
+ *
+ * For example, given the source `"== Hello =="`, a text event for the word
+ * "Hello" would carry `start_offset: 3` and `end_offset: 8`, without ever
+ * allocating the string `"Hello"` until a consumer asks for it.
  */
 export interface TextEvent {
   /** Discriminant for the event union. */
   readonly kind: 'text';
   /** Inclusive start offset (UTF-16 code units into the TextSource). */
-  readonly startOffset: number;
+  readonly start_offset: number;
   /** Exclusive end offset (UTF-16 code units into the TextSource). */
-  readonly endOffset: number;
+  readonly end_offset: number;
   /** Source position of this text range. */
   readonly position: Position;
 }
@@ -152,19 +221,25 @@ export interface TokenEvent {
   /** Discriminant for the event union. */
   readonly kind: 'token';
   /** The token type from the tokenizer. */
-  readonly tokenType: TokenType;
+  readonly token_type: TokenType;
   /** Inclusive start offset (UTF-16 code units into the TextSource). */
-  readonly startOffset: number;
+  readonly start_offset: number;
   /** Exclusive end offset (UTF-16 code units into the TextSource). */
-  readonly endOffset: number;
+  readonly end_offset: number;
   /** Source position of this token. */
   readonly position: Position;
 }
 
 /**
- * Optional error event emitted at recovery points. The parser never throws;
- * instead it produces valid output and optionally emits these events for
- * consumers that want to log or surface parse issues.
+ * Optional error event emitted at recovery points. The parser never throws:
+ * it always produces valid output for any input. When it encounters malformed
+ * wikitext (unclosed templates, mismatched tags, etc.), it recovers and
+ * optionally emits an `ErrorEvent` so consumers can log, surface, or ignore
+ * the issue.
+ *
+ * The optional metadata fields (`severity`, `code`, `recoverable`, `source`,
+ * `details`) support richer diagnostics. They are all optional so that the
+ * simplest error case is just a message and a position.
  */
 export interface ErrorEvent {
   /** Discriminant for the event union. */
@@ -221,9 +296,21 @@ export interface ErrorEventOptions {
 /**
  * Discriminated union of all event types in the wikitext event stream.
  *
- * Switch on `evt.kind` for exhaustive handling. The five variants cover
- * structural open/close (`enter`/`exit`), text content (`text`), raw
- * tokens (`token`), and optional error reporting (`error`).
+ * Switch on `evt.kind` for exhaustive handling:
+ *
+ * ```ts
+ * switch (evt.kind) {
+ *   case 'enter': // open a node
+ *   case 'exit':  // close a node
+ *   case 'text':  // text content (offsets)
+ *   case 'token': // raw token
+ *   case 'error': // recovery point
+ * }
+ * ```
+ *
+ * TypeScript will narrow the type inside each branch, giving access to the
+ * fields specific to that event kind (e.g., `evt.node_type` is only available
+ * inside the `'enter'` and `'exit'` branches).
  */
 export type WikitextEvent =
   | EnterEvent
@@ -235,9 +322,14 @@ export type WikitextEvent =
 // ---------------------------------------------------------------------------
 // Event constructors
 // ---------------------------------------------------------------------------
+//
+// Factory functions for creating event objects. Each returns a fresh
+// immutable object. These are the primary way to build events — prefer
+// these over hand-constructing event objects, because they enforce the
+// correct `kind` discriminant and field names.
 
 /**
- * Create an `EnterEvent`.
+ * Create an {@linkcode EnterEvent}.
  *
  * @example Opening a heading node
  * ```ts
@@ -259,16 +351,16 @@ export type WikitextEvent =
  * });
  * ```
  *
- * @param nodeType - The AST node type being opened.
+ * @param node_type - The AST node type being opened.
  * @param props - Node-specific fields.
  * @param position - Source range.
  */
 export function enterEvent(
-  nodeType: string,
+  node_type: string,
   props: Readonly<Record<string, unknown>>,
   position: Position,
 ): EnterEvent {
-  return { kind: 'enter', nodeType, props, position };
+  return { kind: 'enter', node_type, props, position };
 }
 
 /**
@@ -294,14 +386,14 @@ export function enterEvent(
  * });
  * ```
  *
- * @param nodeType - The AST node type being closed.
+ * @param node_type - The AST node type being closed.
  * @param position - Source range of the closing boundary.
  */
 export function exitEvent(
-  nodeType: string,
+  node_type: string,
   position: Position,
 ): ExitEvent {
-  return { kind: 'exit', nodeType, position };
+  return { kind: 'exit', node_type, position };
 }
 
 /**
@@ -327,16 +419,16 @@ export function exitEvent(
  * });
  * ```
  *
- * @param startOffset - Inclusive start offset (UTF-16 code units).
- * @param endOffset - Exclusive end offset (UTF-16 code units).
+ * @param start_offset - Inclusive start offset (UTF-16 code units).
+ * @param end_offset - Exclusive end offset (UTF-16 code units).
  * @param position - Source position.
  */
 export function textEvent(
-  startOffset: number,
-  endOffset: number,
+  start_offset: number,
+  end_offset: number,
   position: Position,
 ): TextEvent {
-  return { kind: 'text', startOffset, endOffset, position };
+  return { kind: 'text', start_offset, end_offset, position };
 }
 
 /**
@@ -364,22 +456,27 @@ export function textEvent(
  * });
  * ```
  *
- * @param tokenType - The token type from the tokenizer.
- * @param startOffset - Inclusive start offset (UTF-16 code units).
- * @param endOffset - Exclusive end offset (UTF-16 code units).
+ * @param token_type - The token type from the tokenizer.
+ * @param start_offset - Inclusive start offset (UTF-16 code units).
+ * @param end_offset - Exclusive end offset (UTF-16 code units).
  * @param position - Source position.
  */
 export function tokenEvent(
-  tokenType: TokenType,
-  startOffset: number,
-  endOffset: number,
+  token_type: TokenType,
+  start_offset: number,
+  end_offset: number,
   position: Position,
 ): TokenEvent {
-  return { kind: 'token', tokenType, startOffset, endOffset, position };
+  return { kind: 'token', token_type, start_offset, end_offset, position };
 }
 
 /**
- * Create an `ErrorEvent`.
+ * Create an {@linkcode ErrorEvent}.
+ *
+ * The simplest form takes just a message and position. Pass an
+ * {@linkcode ErrorEventOptions} object to attach structured diagnostic
+ * metadata (severity, machine-readable code, recovery status, source
+ * stage, and arbitrary details).
  *
  * @example Emitting an error for an unclosed template
  * ```ts
@@ -415,6 +512,10 @@ export function errorEvent(
   position: Position,
   options: ErrorEventOptions = {},
 ): ErrorEvent {
+  // Object.assign merges the base fields with any optional metadata in a
+  // single allocation. Only the fields present in `options` are included,
+  // so a simple errorEvent('msg', pos) produces { kind, message, position }
+  // without undefined keys for severity, code, etc.
   return Object.assign(
     { kind: 'error' as const, message, position },
     options,
@@ -424,6 +525,14 @@ export function errorEvent(
 // ---------------------------------------------------------------------------
 // Type guards
 // ---------------------------------------------------------------------------
+//
+// Type guards let consumers narrow a `WikitextEvent` to a specific variant.
+// TypeScript's type system uses the return type `event is EnterEvent` (a
+// "type predicate") to narrow the type inside an `if` block or `.filter()`.
+//
+// These are thin wrappers around `event.kind === '...'`, but they're useful
+// for passing as callbacks (e.g., `events.filter(isEnterEvent)`) where an
+// inline arrow function would be noisier.
 
 /**
  * Check whether a `WikitextEvent` is an `EnterEvent`.
@@ -445,7 +554,7 @@ export function errorEvent(
  *
  * function handleEvent(evt: WikitextEvent) {
  *   if (isEnterEvent(evt)) {
- *     evt.nodeType; // string (narrowed)
+ *     evt.node_type; // string (narrowed)
  *     evt.props;    // Record<string, unknown> (narrowed)
  *   }
  * }
@@ -473,7 +582,7 @@ export function isEnterEvent(event: WikitextEvent): event is EnterEvent {
  *
  * function handle(evt: WikitextEvent) {
  *   if (isExitEvent(evt)) {
- *     evt.nodeType; // narrowed
+ *     evt.node_type; // narrowed
  *   }
  * }
  * ```
@@ -500,7 +609,7 @@ export function isExitEvent(event: WikitextEvent): event is ExitEvent {
  *
  * function handle(evt: WikitextEvent) {
  *   if (isTextEvent(evt)) {
- *     evt.startOffset; // narrowed
+ *     evt.start_offset; // narrowed
  *   }
  * }
  * ```
@@ -527,7 +636,7 @@ export function isTextEvent(event: WikitextEvent): event is TextEvent {
  *
  * function handle(evt: WikitextEvent) {
  *   if (isTokenEvent(evt)) {
- *     evt.tokenType; // narrowed
+ *     evt.token_type; // narrowed
  *   }
  * }
  * ```
