@@ -1,4 +1,3 @@
-// deno-lint-ignore-file no-import-prefix no-unversioned-import
 /**
  * Memory regression tests for foundational wikitext APIs.
  *
@@ -18,6 +17,7 @@
  * `deno task test`) to enable manual garbage collection. Without it,
  * the tests still run but the heap measurements are skipped.
  */
+// deno-lint-ignore-file no-import-prefix no-unversioned-import
 
 import { describe, it } from 'jsr:@std/testing/bdd';
 import { expect } from 'jsr:@std/expect';
