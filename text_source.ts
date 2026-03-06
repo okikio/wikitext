@@ -1,0 +1,172 @@
+/**
+ * Text source abstraction for the wikitext parser pipeline.
+ *
+ * Every parser stage (tokenizer, block parser, inline parser) reads input
+ * through the {@linkcode TextSource} interface instead of accepting a bare
+ * `string`. This decouples the scanner from any specific text representation,
+ * so the same parser works with plain strings, rope data structures, and
+ * collaborative editing types (like Yjs `Y.Text`) without any adapter code
+ * for the common case.
+ *
+ * A plain JavaScript `string` already satisfies the interface: it has
+ * `length`, `charCodeAt`, and `slice` built in. No wrapper needed.
+ *
+ * Why this abstraction matters:
+ *
+ * - **Collaboration**: editors backed by CRDTs or ropes can feed text
+ *   directly into the parser without first serializing to a flat string.
+ * - **Streaming**: an append-only buffer can expose new content as it
+ *   arrives, letting the parser work incrementally.
+ * - **Performance**: the tokenizer's inner loop calls `charCodeAt` on
+ *   every character. Implementations must make that call cheap. For
+ *   rope-backed stores, a cursor that amortizes node traversal is
+ *   recommended.
+ *
+ * ```
+ * ┌────────────────────────────────────────────┐
+ * │               TextSource                   │
+ * │  (length, charCodeAt, slice, iterSlices?)  │
+ * └──────────────────┬─────────────────────────┘
+ *                    │
+ *         implements │
+ *      ┌─────────────┼──────────────┐
+ *      │             │              │
+ *   plain string   Rope tree    CRDT buffer
+ *      │             │              │
+ *      └─────────────┴──────────────┘
+ *                    │
+ *                    ▼
+ *            Tokenizer (hot loop)
+ *            calls charCodeAt(i)
+ *            on every character
+ * ```
+ *
+ * @example Creating a TextSource from a plain string
+ * ```ts
+ * import type { TextSource } from './text_source.ts';
+ *
+ * // A plain string already satisfies the interface — no wrapper needed.
+ * const source: TextSource = '== Heading ==\nSome text.';
+ * source.charCodeAt(0); // 61 (code for '=')
+ * source.slice(0, 13);  // '== Heading =='
+ * source.length;         // 24
+ * ```
+ *
+ * @example Satisfying TextSource with a custom backing store
+ * ```ts
+ * import type { TextSource } from './text_source.ts';
+ *
+ * class RopeSource implements TextSource {
+ *   readonly length: number;
+ *   constructor(private rope: { charAt(i: number): string; toString(): string; length: number }) {
+ *     this.length = rope.length;
+ *   }
+ *   charCodeAt(index: number): number {
+ *     return this.rope.charAt(index).charCodeAt(0);
+ *   }
+ *   slice(start: number, end: number): string {
+ *     return this.rope.toString().slice(start, end);
+ *   }
+ * }
+ * ```
+ *
+ * @module
+ */
+
+/**
+ * Minimal read-only text interface consumed by all parser pipeline stages.
+ *
+ * Any object that exposes `length`, `charCodeAt`, and `slice` with the same
+ * semantics as the built-in `String` prototype satisfies this interface.
+ * A plain `string` works out of the box:
+ *
+ * ```ts
+ * const src: TextSource = 'hello';  // ✓ no wrapper needed
+ * ```
+ *
+ * `iterSlices` is an optional optimization hook for chunked consumers
+ * (e.g., streaming serializers that want to avoid concatenating the entire
+ * source into a single string).
+ */
+export interface TextSource {
+  /** Total length in UTF-16 code units. */
+  readonly length: number;
+
+  /**
+   * Return the UTF-16 character code at the given offset.
+   *
+   * Must behave identically to `String.prototype.charCodeAt`: return
+   * `NaN` for out-of-range indices.
+   *
+   * This is the single hottest method in the parser. The tokenizer's
+   * inner loop calls it on every character position. We use `charCodeAt`
+   * (not `charAt`) because comparing numeric codes avoids allocating a
+   * one-character string per comparison, which matters at scan speeds of
+   * millions of characters per second.
+   *
+   * @param index - Zero-based UTF-16 code unit offset.
+   */
+  charCodeAt(index: number): number;
+
+  /**
+   * Return the substring from `start` (inclusive) to `end` (exclusive),
+   * measured in UTF-16 code units.
+   *
+   * Must behave identically to `String.prototype.slice` for non-negative
+   * indices within bounds.
+   *
+   * @param start - Inclusive start offset.
+   * @param end - Exclusive end offset.
+   */
+  slice(start: number, end: number): string;
+
+  /**
+   * Optional: iterate sub-slices of the range `[start, end)` without
+   * concatenating into a single string first. Useful for chunked
+   * serialization or streaming output where the backing store is
+   * segmented (e.g., rope nodes, CRDT runs).
+   *
+   * When absent, consumers fall back to `slice(start, end)`.
+   *
+   * @param start - Inclusive start offset.
+   * @param end - Exclusive end offset.
+   */
+  iterSlices?(start: number, end: number): Iterable<string>;
+}
+
+/**
+ * Resolve a range from a {@linkcode TextSource} into a plain string.
+ *
+ * Throughout the parser, tokens and events carry offset ranges (start/end
+ * integers) rather than extracted strings. This is a deliberate performance
+ * choice: it avoids allocating a new string for every token and sidesteps
+ * V8's sliced-string retention risk, where a small `.slice()` can pin the
+ * entire parent string in memory.
+ *
+ * When a consumer actually needs the text (e.g., to display a node's content
+ * or to build a template name), it calls `slice(source, start, end)`. This
+ * single call site keeps the string-resolution pattern consistent.
+ *
+ * @example Resolving a token range to its string value
+ * ```ts
+ * import { slice } from './text_source.ts';
+ *
+ * const src = '== Heading ==';
+ * slice(src, 3, 10); // 'Heading'
+ * ```
+ *
+ * @example Resolving a zero-length range
+ * ```ts
+ * import { slice } from './text_source.ts';
+ *
+ * slice('hello', 2, 2); // ''
+ * ```
+ *
+ * @param source - The text source to read from.
+ * @param start - Inclusive start offset (UTF-16 code units).
+ * @param end - Exclusive end offset (UTF-16 code units).
+ * @returns The resolved substring.
+ */
+export function slice(source: TextSource, start: number, end: number): string {
+  return source.slice(start, end);
+}
