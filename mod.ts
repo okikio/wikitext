@@ -14,6 +14,7 @@
  * - **{@linkcode WikistNode}** and family: the full AST node model,
  *   type guards, and builder functions
  * - **{@linkcode tokenize}**: generator-based tokenizer over TextSource
+ * - **{@linkcode blockEvents}**: block-level parser yielding structural events
  *
  * As more modules are implemented (block/inline parsers, tree builder,
  * stringifier, filter utilities), they will be re-exported from this
@@ -42,3 +43,4 @@ export * from './token.ts';
 export * from './events.ts';
 export * from './ast.ts';
 export * from './tokenizer.ts';
+export * from './block_parser.ts';
