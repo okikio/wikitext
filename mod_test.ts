@@ -9,6 +9,7 @@
  * Detailed behavioral tests for individual modules live in `ast_test.ts`
  * and future per-module test files.
  */
+// deno-lint-ignore-file no-import-prefix no-unversioned-import
 import { describe, it } from 'jsr:@std/testing/bdd';
 import { expect } from 'jsr:@std/expect';
 
