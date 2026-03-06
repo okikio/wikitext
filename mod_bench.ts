@@ -115,37 +115,39 @@ const MIXED_TEXT = [
   '',
 ].join('\n').repeat(50);
 
-/** Drain a generator by consuming all yielded values. */
-function drainTokenize(input: string) {
+/** Drain a generator, returning the token count to prevent dead-code elimination. */
+function drainTokenize(input: string): number {
+  let count = 0;
   for (const _tok of tokenize(input)) {
-    // consume
+    count++;
   }
+  return count;
 }
 
 summary(() => {
   bench('tokenize: plain text (9 KB)', () => {
     do_not_optimize(drainTokenize(PLAIN_TEXT));
-  });
+  }).gc('inner');
 
   bench('tokenize: headings + paragraphs (3 KB)', () => {
     do_not_optimize(drainTokenize(HEADING_TEXT));
-  });
+  }).gc('inner');
 
   bench('tokenize: tables (3.5 KB)', () => {
     do_not_optimize(drainTokenize(TABLE_TEXT));
-  });
+  }).gc('inner');
 
   bench('tokenize: links + bold/italic (5.5 KB)', () => {
     do_not_optimize(drainTokenize(LINK_TEXT));
-  });
+  }).gc('inner');
 
   bench('tokenize: templates + arguments (4.6 KB)', () => {
     do_not_optimize(drainTokenize(TEMPLATE_TEXT));
-  });
+  }).gc('inner');
 
   bench('tokenize: mixed wikitext (7.5 KB)', () => {
     do_not_optimize(drainTokenize(MIXED_TEXT));
-  });
+  }).gc('inner');
 });
 
 await run();
