@@ -65,14 +65,22 @@ for (const evt of outlineEvents(largeArticle)) {
 
 > **Note:** `parse()`, `stringify()`, `events()`, and `outlineEvents()` are not
 > yet implemented. The foundational type system (TextSource, Token, events, AST
-> nodes) is complete and published. The tokenizer, parsers, tree builder,
+> nodes) and the tokenizer are complete and published. The parsers, tree builder,
 > stringifier, and filter utilities are under active development.
 
-You can already use the type system and builder functions:
+You can already use the type system, builder functions, and tokenizer:
 
 ```ts
 import type { TextSource, WikitextEvent, WikistNode } from '@okikio/wikitext';
-import { TokenType, isToken, root, heading, text } from '@okikio/wikitext';
+import { TokenType, isToken, tokenize, root, heading, text } from '@okikio/wikitext';
+
+// Tokenize wikitext into a stream of offset-based tokens
+for (const tok of tokenize('== Heading ==\nSome text.')) {
+  console.log(tok.type, tok.start, tok.end);
+  // HEADING_MARKER 0 2
+  // WHITESPACE 2 3
+  // ...
+}
 
 // A plain string satisfies the TextSource interface
 const source: TextSource = '== Heading ==\nSome text.';
@@ -119,7 +127,7 @@ event consumers.
 | `token.ts` | Token type constants and `Token` interface | Published |
 | `events.ts` | Event stream types, constructors, and type guards | Published |
 | `ast.ts` | Wikist AST node types, type guards, and builders | Published |
-| `tokenizer.ts` | `charCodeAt` scanner over `TextSource` | Not yet implemented |
+| `tokenizer.ts` | `charCodeAt` generator scanner over `TextSource` | Published |
 | `block_parser.ts` | Block-level event emitter | Not yet implemented |
 | `inline_parser.ts` | Inline event enrichment | Not yet implemented |
 | `parse.ts` | Orchestration (tokenizer, block, inline, tree) | Not yet implemented |
@@ -144,7 +152,7 @@ event consumers.
 
 | Function | Description |
 |----------|-------------|
-| `tokens(input)` | Raw token stream. _Not yet implemented._ |
+| `tokenize(input)` | Raw token generator stream. **Available now.** |
 | `buildTree(events)` | Build AST from an event iterable. _Not yet implemented._ |
 
 ### Tree utilities
@@ -163,6 +171,7 @@ event consumers.
 | `TokenType` | `token.ts` | Constant map of all token types |
 | `Token` | `token.ts` | Token interface (type + start/end offsets) |
 | `isToken()` | `token.ts` | Type guard for Token validation |
+| `tokenize()` | `tokenizer.ts` | Generator-based charCodeAt scanner |
 | `WikitextEvent` | `events.ts` | Discriminated union of 5 event kinds |
 | `enterEvent()`, `exitEvent()`, ... | `events.ts` | Event constructors |
 | `isEnterEvent()`, `isExitEvent()`, ... | `events.ts` | Event type guards |
