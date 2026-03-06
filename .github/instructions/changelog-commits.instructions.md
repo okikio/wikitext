@@ -20,15 +20,15 @@ the task is specifically about commits or changelogs.
 Use Conventional Commits:
 
 Use this commit subject shape:
-`type(scope?): short outcome summary`
+`type(scope?): short precise outcome summary`
 
 Replace `type`, `scope`, and the summary with real values.
 Do not output the placeholder words literally.
 
 Examples:
 
-- `fix(parser): preserve trailing blank lines in stringify`
-- `docs: add header quality rules for TSDoc sections`
+- `fix(parser): preserve trailing blank lines in stringify function`
+- `docs: add header quality rules (aka headers should avoid breaking flow, etc...) for TSDoc sections`
 - `feat(events): add outline-only event stream`
 
 Do not write:
