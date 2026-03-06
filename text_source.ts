@@ -1,26 +1,15 @@
 /**
- * Text source abstraction for the wikitext parser pipeline.
+ * Text source abstraction that lets the parser accept plain strings, ropes,
+ * and CRDT buffers through one interface.
  *
- * Every parser stage (tokenizer, block parser, inline parser) reads input
- * through the {@linkcode TextSource} interface instead of accepting a bare
- * `string`. This decouples the scanner from any specific text representation,
- * so the same parser works with plain strings, rope data structures, and
- * collaborative editing types (like Yjs `Y.Text`) without any adapter code
- * for the common case.
+ * A plain JavaScript `string` already satisfies {@linkcode TextSource}
+ * (`length`, `charCodeAt`, and `slice` are built in), so the common case
+ * needs no wrapper. Editors backed by ropes or CRDTs implement the same
+ * three methods and feed their buffers directly into the parser, without
+ * serializing to a flat string first.
  *
- * A plain JavaScript `string` already satisfies the interface: it has
- * `length`, `charCodeAt`, and `slice` built in. No wrapper needed.
- *
- * Why this abstraction matters:
- *
- * - **Collaboration**: editors backed by CRDTs or ropes can feed text
- *   directly into the parser without first serializing to a flat string.
- * - **Streaming**: an append-only buffer can expose new content as it
- *   arrives, letting the parser work incrementally.
- * - **Performance**: the tokenizer's inner loop calls `charCodeAt` on
- *   every character. Implementations must make that call cheap. For
- *   rope-backed stores, a cursor that amortizes node traversal is
- *   recommended.
+ * The payoff: one tokenizer, one event stream, one AST builder -- all
+ * source-representation-agnostic.
  *
  * ```
  * ┌────────────────────────────────────────────┐
@@ -41,11 +30,45 @@
  *            on every character
  * ```
  *
+ * The tokenizer scans every character by calling `source.charCodeAt(i)`
+ * in a tight inner loop. This is the single hottest call in the parser.
+ * Using numeric codes (not `charAt` strings) avoids allocating a
+ * one-character string per comparison, which matters at millions of
+ * characters per second on large articles.
+ *
+ * ```ts
+ * // Simplified tokenizer loop -- runs once per character
+ * while (i < source.length) {
+ *   const code = source.charCodeAt(i);    // hot call
+ *   if (code >= 128 || !DELIMITER[code]) {
+ *     // absorb non-delimiter text
+ *   } else {
+ *     // handle delimiter
+ *   }
+ * }
+ * ```
+ *
+ * For a plain `string`, `charCodeAt` is a single indexed read. For a
+ * rope-backed editor, the implementation might traverse tree nodes. The
+ * interface hides this difference so the parser doesn't need to care.
+ *
+ * Tokens and events carry start/end offsets rather than extracted strings.
+ * `slice` is called only when a consumer actually needs the text content
+ * (to build a template name, render HTML, or display a node value):
+ *
+ * ```ts
+ * const value = source.slice(token.start, token.end);
+ * ```
+ *
+ * Keeping `slice` out of the hot loop avoids per-token string allocation
+ * and prevents V8 sliced-string retention (where a small `.slice()` can
+ * pin the entire parent string in memory).
+ *
  * @example Creating a TextSource from a plain string
  * ```ts
  * import type { TextSource } from './text_source.ts';
  *
- * // A plain string already satisfies the interface — no wrapper needed.
+ * // A plain string already satisfies the interface -- no wrapper needed.
  * const source: TextSource = '== Heading ==\nSome text.';
  * source.charCodeAt(0); // 61 (code for '=')
  * source.slice(0, 13);  // '== Heading =='
