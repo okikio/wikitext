@@ -3,9 +3,12 @@
 ## Current status
 
 - Foundation types complete and published (text_source.ts, token.ts, events.ts, ast.ts)
-- Tokenizer complete (tokenizer.ts) with 112 tests including property-based fuzz
+- Tokenizer complete (tokenizer.ts) with 118 tests including property-based fuzz
 - Educational docs and TSDoc added across all source and test files
-- Next task: T05 (Block parser implementation, Phase 3)
+- Documentation quality audit complete (header clarity, opening ledes, intent-grounded comments)
+- Test imports centralized via deno.json import map
+- Benchmarks GC-annotated for allocation-heavy tokenizer paths
+- Current task: T05 (Block parser implementation, Phase 3) — in progress
 - Blockers: none
 
 ## Completed
@@ -64,6 +67,18 @@
   - `mod_bench.ts`: tokenizer throughput benchmarks on 6 representative inputs
   - `deno task test` passes (227 total tests)
 
+- [x] T04.5: Phase 2 review and quality gate
+  - Documentation quality audit: fixed weak headers, buried ledes, added
+    intent-grounding opening lines to all tokenizer inline comments
+  - Test fixes: added 6 edge case tests (tab, self-closing tags, entities,
+    CRLF, less-than digit, bare ampersand), fixed unused variable
+  - Centralized test imports via deno.json import map (removed inline jsr:/npm: specifiers)
+  - Benchmark fixes: drainTokenize now returns token count for do_not_optimize,
+    added .gc('inner') to all tokenizer benchmarks
+  - Updated .agents/ files: PROJECT.md (tokenizer now listed as implemented),
+    PROGRESS.md, TASKS.md
+  - `deno task test` passes (253 total tests)
+
 ## Notes for the next agent
 
 - Conventions:
@@ -79,11 +94,14 @@
 - What's implemented:
   - text_source.ts, token.ts, events.ts, ast.ts (all published)
   - tokenizer.ts: generator-based scanner over TextSource
+  - block_parser.ts: block-level event generator (headings, paragraphs, lists,
+    definition lists, tables, thematic breaks, preformatted blocks)
   - mod.ts re-exports all of the above
-  - Tests: mod_test.ts, ast_test.ts, mod_memory_test.ts, tokenizer_test.ts
-  - Benchmarks: mod_bench.ts (foundations + tokenizer throughput)
+  - Tests: mod_test.ts, ast_test.ts, mod_memory_test.ts, tokenizer_test.ts,
+    block_parser_test.ts (253+ total)
+  - Benchmarks: mod_bench.ts (foundations + tokenizer throughput, GC-annotated)
 - What's NOT implemented yet:
-  - block_parser.ts, inline_parser.ts
+  - inline_parser.ts
   - parse.ts, tree_builder.ts, stringify.ts, filter.ts
   - session.ts
 - Verification commands:

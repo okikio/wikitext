@@ -48,6 +48,34 @@ Rules:
     - [x] Never-throw fuzz check passes
     - [x] `deno task test` passes
 
+- [x] T04.5: Phase 2 review and quality gate
+  - Why: Ensure Phase 2 output is solid before moving to block parser
+  - Done when:
+    - [x] Doc quality audit: headers, ledes, intent comments all reviewed
+    - [x] Test lint errors fixed (unused variables, inline specifiers)
+    - [x] Missing edge case tests added (tab, self-close, entities, CRLF)
+    - [x] Benchmark GC annotations added for tokenizer
+    - [x] .agents/ files updated (PROJECT, PROGRESS, TASKS)
+    - [x] `deno task test` passes (253 tests)
+
+- [ ] T05: Implement block parser (Phase 3)
+  - Why: Block-level structure is the next layer above the tokenizer
+  - Done when:
+    - [ ] `block_parser.ts` exports `blockEvents(source, tokens)` generator
+    - [ ] Headings: `== Title ==` emits enter/exit heading with level prop
+    - [ ] Paragraphs: plain text lines accumulate into paragraph blocks
+    - [ ] Bullet lists: `*`, `**` with nesting and list-item events
+    - [ ] Ordered lists: `#`, `##` with nesting and list-item events
+    - [ ] Definition lists: `;` term, `:` description with nesting
+    - [ ] Tables: `{|`, `|}`, `|-`, `|+`, `|`, `||`, `!`, `!!`
+    - [ ] Thematic breaks: `----` emits enter/exit thematic-break
+    - [ ] Preformatted: leading space emits preformatted block
+    - [ ] Event well-formedness: every enter has matching exit
+    - [ ] Never-throw: any token stream produces valid events
+    - [ ] Property-based fuzz tests with fast-check
+    - [ ] `deno task test` passes
+    - [ ] `mod.ts` re-exports `blockEvents`
+
 ## Parking lot
 
 - [ ] P01: Write ADR for events-first architecture decision

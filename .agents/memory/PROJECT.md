@@ -18,17 +18,18 @@ interchange format.
 
 Implemented:
 - `text_source.ts`: `TextSource` interface + `slice()` helper
-- `token.ts`: `TokenType` const-object (40+ types), `Token` interface, `isToken()`
+- `token.ts`: `TokenType` const-object (45 types), `Token` interface, `isToken()`
 - `events.ts`: `WikitextEvent` union (5 kinds), constructors, type guards
 - `ast.ts`: 37 wikist node types, type guards, builder functions
+- `tokenizer.ts`: charCodeAt generator-based scanner over TextSource
+- `block_parser.ts`: block-level event generator (headings, paragraphs, lists,
+  definition lists, tables, thematic breaks, preformatted blocks)
 
 Not yet implemented:
-- `tokenizer.ts`: charCodeAt generator-based scanner
-- `block_parser.ts`: block-level event emitter
 - `inline_parser.ts`: inline event enrichment
-- `parse.ts`: orchestration (tokenizer → block → inline → tree)
-- `tree_builder.ts`: `buildTree(events) → WikistRoot`
-- `stringify.ts`: AST → wikitext (round-trip)
+- `parse.ts`: orchestration (tokenizer -> block -> inline -> tree)
+- `tree_builder.ts`: `buildTree(events) -> WikistRoot`
+- `stringify.ts`: AST -> wikitext (round-trip)
 - `filter.ts`: filter/visit for tree and event streams
 - `session.ts`: stateful Session wrapper (incremental, streaming)
 
@@ -37,6 +38,8 @@ Not yet implemented:
 Available now:
 - `TextSource`, `slice()` (text_source.ts)
 - `TokenType`, `Token`, `isToken()` (token.ts)
+- `tokenize()` (tokenizer.ts)
+- `blockEvents()` (block_parser.ts)
 - `WikitextEvent`, `EnterEvent`, `ExitEvent`, ... + constructors + guards (events.ts)
 - `WikistNode`, `WikistRoot`, 37 node types + type guards + builders (ast.ts)
 
