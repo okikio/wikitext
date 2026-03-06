@@ -20,21 +20,25 @@ Lead with user benefit, not internal mechanics:
    blockquotes, code examples, assumptions, edge cases, limitations, and other
    important context.
 
-This order applies to READMEs, JSR/GitHub descriptions, TSDoc for exported APIs,
+This order applies to READMEs, descriptions, prs, TSDocs, comments,
 and any prose that introduces a concept.
 
 ## Writing style
 
-- Write with a clear narrative and smooth transitions. Aim to have a smooth flow
-  and steady pace. Section headers interrupt flow; prefer prose that moves:
-  intent, context, approach, edge cases, examples, background, reasoning.
+- Write with a clear narrative and smooth transitions. Aim for steady pacing
+  and momentum. When the prose flows naturally from one topic to the next, use
+  transitions instead of headers: a bridging sentence is less disruptive than
+  a heading that resets the reader's rhythm.
+- Place headers only where there are distinctly separate concepts and the
+  pacing benefits from the break. A header that labels the next paragraph is
+  noise; one that signals a genuine subject shift helps the reader reorient.
+  When a header is warranted, make it descriptive and functional, not just
+  topical.
+- Headers should be action-oriented and benefit-driven. Avoid vague labels like “Overview” or “How to use”; instead, describe the specific task, outcome, or concept shift (e.g., “Building nodes programmatically,” “Walking the tree to collect text”).
 - Use plain English. When technical terms are necessary, define them clearly and
   ground them in context.
-- Headers should be descriptive and functional, not just topical. They should
-  guide the reader through the narrative rather than just labeling sections.
 - Use the subject's name naturally rather than passive constructions.
 - Expand acronyms on first use and define key terms.
-- Prefer short sections with clear headers over long walls of text.
 - Include ASCII diagrams when they clarify structure or sequence.
 - When describing algorithms, include step-by-step "how it works" and list
   assumptions explicitly.
@@ -57,5 +61,8 @@ If writing specs or design notes:
   or caveats. Lead with what it does and why it matters.
 - **Feature-first descriptions**: listing capabilities before explaining the
   problem they solve forces the reader to infer the benefit themselves.
+- **Header-heavy writing**: splitting flowing prose into many small headed
+  sections breaks momentum. If the reader would naturally continue from one
+  topic to the next, a transition sentence serves better than a heading.
 - **Over-hedging**: avoid "this may be useful if" or "you might want to
   consider". Be direct.
