@@ -1,83 +1,80 @@
 /**
- * Token types and the {@linkcode Token} interface consumed by all parser stages.
+ * Token vocabulary and token shape for the raw scanner layer.
  *
- * Tokens are the lowest-level structural unit the parser produces. The
- * tokenizer scans a {@linkcode TextSource} character by character and yields
- * `Token` objects that identify meaningful character sequences: headings,
- * link brackets, bold/italic markers, table delimiters, and so on.
+ * This file defines the smallest structural units the tokenizer can emit.
+ * A token is not a parsed wiki node. It is a labeled span of source text.
+ * Later stages decide what those spans mean in context.
  *
- * Each token stores `start` and `end` offsets into the source text, not
- * extracted string values. Consumers call `slice(source, token.start, token.end)`
- * when they actually need the text. This offset-based design has two benefits:
+ * The tokenizer walks a `TextSource` and emits `Token` objects whose `type`
+ * says what kind of character sequence was recognized and whose `start` and
+ * `end` fields point back into the original source. Consumers recover text
+ * only when they actually need it.
  *
- * 1. **No per-token allocation**: yielding offsets is cheaper than creating
- *    a new string for every token.
- * 2. **No V8 sliced-string retention**: when you call `str.slice(a, b)`, V8
- *    may keep the entire parent string alive in memory (a "sliced string").
- *    By deferring slicing until the consumer truly needs it, we avoid
- *    accidentally pinning large input strings.
+ * That design keeps the hot path simple:
  *
- * ## The const-object pattern (instead of `enum`)
+ * - the scanner can work with offsets instead of allocating a string for
+ *   every token
+ * - downstream code can slice lazily
+ * - small token views do not accidentally keep large source strings alive
  *
- * `TokenType` is defined as a frozen `const` object rather than a TypeScript
- * `enum`. This pattern produces the same developer experience (autocomplete,
- * exhaustive switch) while being more compatible with tree-shaking, more
- * debuggable (values are human-readable strings, not opaque integers), and
- * standard JavaScript.
+ * The key invariant is simple: token ranges tile the input from start to end.
+ * There are no gaps and no overlaps. Adjacent tokens meet exactly at their
+ * shared boundary.
+ *
+ * For the input `"== Hi =="`, the stream can be visualized like this:
  *
  * ```
- * ┌────────────────────────────────────────────┐
- * │             TokenType (const)              │
- * │  TEXT  NEWLINE  HEADING_MARKER  PIPE  ...  │
- * └──────────────────┬─────────────────────────┘
- *                    │
- *        used as discriminant in
- *                    │
- *              ┌─────┴─────┐
- *              │   Token   │
- *              │  { type,  │
- *              │    start, │
- *              │    end }  │
- *              └───────────┘
+ * source:  =  =     H  i     =  =
+ * index :  0  1  2  3  4  5  6  7  8
+ *
+ * range :  [0,2) [2,3) [3,5) [5,6) [6,8) [8,8)
+ * token :  ?      WHITESPACE TEXT  WHITESPACE ?      EOF
  * ```
  *
- * @example Reading token fields
- * ```ts
- * import type { Token } from './token.ts';
- * import { TokenType } from './token.ts';
+ * The exact token kind for the `==` runs depends on the tokenizer's heading
+ * rules. If the scanner distinguishes opening and closing heading markers,
+ * those positions would be `HEADING_MARKER` and `HEADING_MARKER_CLOSE`.
+ * If it does not, they would be `EQUALS`. 
  *
- * const tok: Token = { type: TokenType.HEADING_MARKER, start: 0, end: 2 };
- * tok.type;  // 'HEADING_MARKER' (a string, not a number)
- * tok.start; // 0
- * tok.end;   // 2
- * ```
- *
- * @example Using the type guard
- * ```ts
- * import { isToken, TokenType } from './token.ts';
- *
- * const tok = { type: TokenType.TEXT, start: 5, end: 12 };
- * isToken(tok); // true
- * ```
+ * This file only defines the vocabulary and the shared token contract.
+ * Block structure, inline structure, and semantic classification happen in
+ * later stages of the pipeline.
  *
  * @module
  */
 
 /**
- * Constant map of all token types produced by the tokenizer.
+ * Constant map of token kinds emitted by the tokenizer.
  *
- * Each value represents a distinct class of character sequence recognized
- * during scanning. The tokenizer yields one `Token` per recognized unit;
- * higher-level parsers (block, inline) consume these to emit events.
+ * Each value names one class of source span the scanner can recognize.
+ * Some token kinds are purely lexical, such as `TEXT`, `NEWLINE`, and
+ * `WHITESPACE`. Others mark delimiter runs such as `[[`, `{{`, `{|`,
+ * or apostrophe runs used later for bold and italic parsing.
  *
- * This is a plain `as const` object, not a TypeScript `enum`. The values
- * are human-readable strings (`'TEXT'`, `'HEADING_MARKER'`) rather than
- * opaque numbers, so they show up clearly in logs and debugger output.
- * TypeScript still narrows them to literal types, giving the same
- * exhaustive-switch experience as an enum.
+ * `TokenType` is a plain `as const` object instead of a TypeScript `enum`.
+ * That keeps the runtime shape simple and standard JavaScript friendly while
+ * still giving TypeScript a literal-string union for narrowing and exhaustive
+ * switching.
  *
- * Names use UPPER_SNAKE_CASE. Grouped by syntactic role so related tokens
- * are easy to find.
+ * In practice that means:
+ *
+ * - debugger output stays readable because token types are strings
+ * - logs show meaningful names instead of numeric enum members
+ * - bundlers do not need to preserve enum machinery
+ * 
+ * Example shape:
+ *
+ * ```ts
+ * const tok = { type: TokenType.TEXT, start: 5, end: 9 };
+ * ```
+ *
+ * The token does not store its own string value. Consumers recover text from
+ * the source with `slice(source, tok.start, tok.end)`.
+ *
+ * Keep one boundary in mind while reading these names: they describe what the
+ * scanner saw, not the full meaning of the construct. For example, `[[` may
+ * later become a wikilink, a category link, or a file link depending on the
+ * surrounding parse rules.
  */
 export const TokenType = {
   // -- Text and whitespace --
@@ -91,9 +88,9 @@ export const TokenType = {
 
   // -- Heading --
 
-  /** One or more `=` characters at line start (heading open). */
+  /** One or more `=` characters recognized as a heading opener. */
   HEADING_MARKER: 'HEADING_MARKER',
-  /** One or more `=` characters at line end (heading close). */
+  /** One or more `=` characters recognized as a heading closer. */
   HEADING_MARKER_CLOSE: 'HEADING_MARKER_CLOSE',
 
   // -- Lists --
@@ -134,32 +131,39 @@ export const TokenType = {
   // -- Bold / Italic --
 
   /**
-   * Consecutive `'` characters (2 or more). The token's length encodes
-   * the run: 2 = italic, 3 = bold, 5 = bold+italic, etc. Disambiguation
-   * is deferred to the inline parser.
+   * Consecutive `'` characters (2 or more). The token's length encodes 
+   * 
+   * 
+   * Consecutive apostrophes, usually length 2 or greater.
+   *
+   * The tokenizer preserves the raw run length and leaves interpretation to the
+   * inline parser. That later stage decides whether the run participates in
+   * italic, bold, bold+italic, or should stay literal under recovery rules.
+   * 
+   * Standard usage is: 2 = italic, 3 = bold, 5 = bold+italic, etc.
    */
   APOSTROPHE_RUN: 'APOSTROPHE_RUN',
 
   // -- Links --
 
-  /** `[[` (wikilink / image / category open). */
+  /** `[[` delimiter. Later parsing decides whether this is a wikilink, file link, or category link. */
   LINK_OPEN: 'LINK_OPEN',
-  /** `]]` (wikilink / image / category close). */
+  /** `]]` delimiter for double-bracket links. */
   LINK_CLOSE: 'LINK_CLOSE',
-  /** `[` (external link open). */
+  /** `[` delimiter for bracketed external-link syntax. */
   EXT_LINK_OPEN: 'EXT_LINK_OPEN',
-  /** `]` (external link close). */
+  /** `]` delimiter for bracketed external-link syntax. */
   EXT_LINK_CLOSE: 'EXT_LINK_CLOSE',
 
   // -- Templates / arguments --
 
-  /** `{{` (template / parser function open). */
+  /** `{{` delimiter used by templates and parser-function-like constructs. */
   TEMPLATE_OPEN: 'TEMPLATE_OPEN',
-  /** `}}` (template / parser function close). */
+  /** `}}` closing delimiter for double-brace constructs. */
   TEMPLATE_CLOSE: 'TEMPLATE_CLOSE',
-  /** `{{{` (argument / triple-brace parameter open). */
+  /** `{{{` opening delimiter for triple-brace argument syntax. */
   ARGUMENT_OPEN: 'ARGUMENT_OPEN',
-  /** `}}}` (argument / triple-brace parameter close). */
+  /** `}}}` closing delimiter for triple-brace argument syntax. */
   ARGUMENT_CLOSE: 'ARGUMENT_CLOSE',
 
   // -- HTML / extension tags --
@@ -178,8 +182,7 @@ export const TokenType = {
   COMMENT_CLOSE: 'COMMENT_CLOSE',
 
   // -- HTML entity --
-
-  /** `&...;` HTML character entity. */
+  /** A complete HTML character reference such as `&amp;`, `&#123;`, or `&#x1F;`. */
   HTML_ENTITY: 'HTML_ENTITY',
 
   // -- Special constructs --
@@ -193,7 +196,7 @@ export const TokenType = {
 
   // -- Equals (non-heading context) --
 
-  /** `=` not at line start/end (e.g., template argument separator). */
+  /** `=` characters not classified as heading markers at this scanner position. */
   EQUALS: 'EQUALS',
 
   // -- End of input --
@@ -205,91 +208,61 @@ export const TokenType = {
 /**
  * Union of all token type string literals.
  *
- * TypeScript derives this from the `TokenType` const object:
- * `typeof TokenType[keyof typeof TokenType]` extracts every value.
- * The result is `'TEXT' | 'NEWLINE' | 'HEADING_MARKER' | ...`, which
- * lets the compiler narrow `Token.type` in switch statements and
- * equality checks.
+ * Derived from `TokenType`, so `Token["type"]` narrows cleanly in equality
+ * checks and `switch` statements.
  */
 export type TokenType = typeof TokenType[keyof typeof TokenType];
 
 /**
- * Precomputed membership set for {@linkcode TokenType} string values.
+ * Membership set for fast runtime validation of token type strings.
  *
- * Why a `Set` instead of calling `Object.values(TokenType).includes()`
- * each time? `Object.values()` allocates a fresh array on every call,
- * and `.includes()` does a linear scan. Since `isToken()` is a hot-path
- * guard called by downstream consumers, we pay the one-time cost of
- * building a `Set` and get O(1) `.has()` lookups with zero allocation
- * afterward.
+ * Built once so `isToken()` can avoid repeated array allocation and linear
+ * scans over `Object.values(TokenType)`.
  */
 const TOKEN_TYPE_SET: ReadonlySet<string> = new Set<string>(
   Object.values(TokenType),
 );
 
 /**
- * A single token produced by the tokenizer.
+ * A single scanner token.
  *
- * Tokens carry start/end offsets into the {@linkcode TextSource}, not value
- * strings. This is a core performance discipline: it avoids per-token string
- * allocation and sidesteps V8's sliced-string retention risk (where a small
- * `string.slice()` can pin the entire parent string in memory).
+ * A token identifies a span of source text and labels it with a token kind.
+ * It does not store a copied string value. Consumers recover text from the
+ * original `{@link TextSource}` when needed.
  *
- * To get the text a token represents, call:
- * ```ts
- * import { slice } from './text_source.ts';
- * const value = slice(source, token.start, token.end);
- * ```
+ * This keeps the scanner cheap and makes token streams safe to hold onto even
+ * when the input is large.
  *
- * Each yielded token is a fresh immutable object: the tokenizer never
- * reuses token objects across generator yields, so consumers can safely
- * hold references.
+ * Another important invariant follows from the tokenizer contract: token
+ * ranges tile the input. For non-EOF tokens, the concatenation of all
+ * `slice(source, token.start, token.end)` values reconstructs the original
+ * source exactly.
  */
 export interface Token {
-  /** Discriminant identifying the syntactic role of this token. */
+  /** Token kind from the shared `TokenType` vocabulary. */
   readonly type: TokenType;
 
-  /** Inclusive start offset in UTF-16 code units into the `TextSource`. */
+  /** Inclusive UTF-16 start offset into the source. */
   readonly start: number;
 
-  /** Exclusive end offset in UTF-16 code units into the `TextSource`. */
+  /** Exclusive UTF-16 end offset into the source. */
   readonly end: number;
 }
 
 /**
- * Type guard: check whether an unknown value is a valid {@linkcode Token}.
+ * Returns `true` when a value has the runtime shape of a `Token`.
  *
- * Tests for a non-null object with `type`, `start`, and `end` fields where
- * `type` is a known {@linkcode TokenType} string. This is useful at system
- * boundaries (e.g., deserializing tokens from JSON, filtering mixed arrays)
- * where the shape is not statically guaranteed.
+ * This is mainly useful at system boundaries where static typing cannot help,
+ * such as JSON input, message passing, or mixed collections.
  *
- * Uses the precomputed {@linkcode TOKEN_TYPE_SET} for O(1) membership
- * checks rather than scanning the `TokenType` values on every call.
+ * The check is structural:
  *
- * @example Filtering tokens from a mixed array
- * ```ts
- * import { isToken, TokenType } from './token.ts';
+ * - object and not `null`
+ * - `type` is a known token type string
+ * - `start` and `end` are numbers
  *
- * const things = [
- *   { type: TokenType.TEXT, start: 0, end: 5 },
- *   { kind: 'other' },
- *   null,
- * ];
- * const tokens = things.filter(isToken);
- * // tokens.length === 1
- * ```
- *
- * @example Narrowing an unknown value
- * ```ts
- * import { isToken } from './token.ts';
- *
- * function process(val: unknown) {
- *   if (isToken(val)) {
- *     val.start; // number (narrowed)
- *   }
- * }
- * ```
+ * It does not validate semantic invariants such as `start <= end` or whether
+ * the range is valid for a particular source.
  */
 export function isToken(value: unknown): value is Token {
   // Reject primitives and null early — they can't be tokens.
