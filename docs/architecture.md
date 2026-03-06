@@ -478,20 +478,27 @@ The parser supports this pattern by providing:
 
 Flat files at root alongside `mod.ts`. No `src/` folder.
 
+Implemented:
+
 | File | Role |
 |------|------|
-| `ast.ts` | Wikist node types, type guards, builders |
-| `events.ts` | `WikitextEvent` union, constructors |
-| `token.ts` | `Token` interface, `TokenType` const-object |
-| `tokenizer.ts` | Generator-based scanner |
-| `block_parser.ts` | Block-level event emitter |
-| `inline_parser.ts` | Inline event enrichment |
-| `parse.ts` | Orchestration (tokenize → block → inline → tree) |
-| `tree_builder.ts` | `buildTree(events) → WikistRoot` |
-| `stringify.ts` | AST → wikitext (round-trip) |
-| `filter.ts` | Filter/visit for tree and event streams |
-| `mod.ts` | Re-exports all public APIs |
 | `text_source.ts` | `TextSource` interface and string adapter |
+| `token.ts` | `Token` interface, `TokenType` const-object |
+| `events.ts` | `WikitextEvent` union, constructors |
+| `ast.ts` | Wikist node types, type guards, builders |
+| `tokenizer.ts` | Generator-based `charCodeAt` scanner |
+| `block_parser.ts` | Block-level event emitter |
+| `mod.ts` | Re-exports all public APIs |
+
+Planned:
+
+| File | Role |
+|------|------|
+| `inline_parser.ts` | Inline event enrichment |
+| `parse.ts` | Orchestration (tokenize -> block -> inline -> tree) |
+| `tree_builder.ts` | `buildTree(events)` to `WikistRoot` |
+| `stringify.ts` | AST to wikitext (round-trip) |
+| `filter.ts` | Filter/visit for tree and event streams |
 | `session.ts` | `createSession()` stateful API |
 
 Advanced modules (planned): `async_tokenizer.ts`, `push_parser.ts`,
