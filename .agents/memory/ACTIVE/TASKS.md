@@ -40,13 +40,13 @@ Rules:
     - [x] `deno task test` passes
     - [x] Educational TSDoc with ASCII diagrams across all files
 
-- [ ] T04: Implement tokenizer
+- [x] T04: Implement tokenizer
   - Why: Character-level scanner is the lowest layer
   - Done when:
-    - [ ] `tokenizer.ts` is a working generator-based scanner over `TextSource`
-    - [ ] Token coverage: every input code unit is covered
-    - [ ] Never-throw fuzz check passes
-    - [ ] `deno task test` passes
+    - [x] `tokenizer.ts` is a working generator-based scanner over `TextSource`
+    - [x] Token coverage: every input code unit is covered
+    - [x] Never-throw fuzz check passes
+    - [x] `deno task test` passes
 
 ## Parking lot
 

@@ -3,8 +3,9 @@
 ## Current status
 
 - Foundation types complete and published (text_source.ts, token.ts, events.ts, ast.ts)
+- Tokenizer complete (tokenizer.ts) with 112 tests including property-based fuzz
 - Educational docs and TSDoc added across all source and test files
-- Next task: T04 (Tokenizer implementation)
+- Next task: T05 (Block parser implementation, Phase 3)
 - Blockers: none
 
 ## Completed
@@ -49,6 +50,20 @@
   - `deno doc --lint mod.ts` passes
   - `deno task test` passes
 
+- [x] T04: Implement tokenizer
+  - `tokenizer.ts`: generator-based charCodeAt scanner over TextSource
+  - Yields offset-based tokens (never stores string values)
+  - Recognizes all 40+ TokenType values: headings, lists, tables, links,
+    templates, arguments, bold/italic, HTML tags, comments, entities,
+    signatures, behavior switches, thematic breaks, preformatted markers
+  - Never-throw invariant: verified with fast-check property-based tests
+  - Token coverage invariant: ranges tile input with no gaps or overlaps
+  - Determinism: same input always produces same token sequence
+  - `tokenizer_test.ts`: 112 tests (example-based + boundary + property-based)
+  - `mod.ts`: re-exports tokenize()
+  - `mod_bench.ts`: tokenizer throughput benchmarks on 6 representative inputs
+  - `deno task test` passes (227 total tests)
+
 ## Notes for the next agent
 
 - Conventions:
@@ -63,11 +78,12 @@
   - Phases are internal planning only: docs say "not yet implemented"
 - What's implemented:
   - text_source.ts, token.ts, events.ts, ast.ts (all published)
+  - tokenizer.ts: generator-based scanner over TextSource
   - mod.ts re-exports all of the above
-  - Tests: mod_test.ts, ast_test.ts, mod_memory_test.ts
-  - Benchmarks: mod_bench.ts
+  - Tests: mod_test.ts, ast_test.ts, mod_memory_test.ts, tokenizer_test.ts
+  - Benchmarks: mod_bench.ts (foundations + tokenizer throughput)
 - What's NOT implemented yet:
-  - tokenizer.ts, block_parser.ts, inline_parser.ts
+  - block_parser.ts, inline_parser.ts
   - parse.ts, tree_builder.ts, stringify.ts, filter.ts
   - session.ts
 - Verification commands:
