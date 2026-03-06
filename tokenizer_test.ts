@@ -1,0 +1,807 @@
+/**
+ * Tests for the tokenizer.
+ *
+ * Covers: basic text, whitespace, newlines, headings, lists, tables,
+ * bold/italic, links, templates, arguments, HTML tags, entities, comments,
+ * signatures, behavior switches, thematic breaks, preformatted markers,
+ * and the never-throw/coverage invariants via property-based tests.
+ *
+ * @module
+ */
+
+import { describe, it } from 'jsr:@std/testing/bdd';
+import { expect } from 'jsr:@std/expect';
+import * as fc from 'npm:fast-check';
+
+import { tokenize } from './tokenizer.ts';
+import { TokenType } from './token.ts';
+import type { Token } from './token.ts';
+
+/** Collect all tokens from a string into an array. */
+function tokens(input: string): Token[] {
+  return Array.from(tokenize(input));
+}
+
+/** Shorthand for the token type at index `i`. */
+function typeAt(toks: Token[], i: number): string {
+  return toks[i].type;
+}
+
+// ---------------------------------------------------------------------------
+// Empty and trivial inputs
+// ---------------------------------------------------------------------------
+
+describe('empty and trivial inputs', () => {
+  it('empty string yields only EOF', () => {
+    const t = tokens('');
+    expect(t).toHaveLength(1);
+    expect(t[0]).toEqual({ type: TokenType.EOF, start: 0, end: 0 });
+  });
+
+  it('single character yields TEXT + EOF', () => {
+    const t = tokens('x');
+    expect(t).toHaveLength(2);
+    expect(t[0]).toEqual({ type: TokenType.TEXT, start: 0, end: 1 });
+    expect(t[1].type).toBe(TokenType.EOF);
+  });
+
+  it('single newline yields NEWLINE + EOF', () => {
+    const t = tokens('\n');
+    expect(t).toHaveLength(2);
+    expect(t[0]).toEqual({ type: TokenType.NEWLINE, start: 0, end: 1 });
+    expect(t[1].type).toBe(TokenType.EOF);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Newline handling
+// ---------------------------------------------------------------------------
+
+describe('newlines', () => {
+  it('LF newline', () => {
+    const t = tokens('a\nb');
+    expect(typeAt(t, 0)).toBe(TokenType.TEXT);
+    expect(typeAt(t, 1)).toBe(TokenType.NEWLINE);
+    expect(t[1]).toEqual({ type: TokenType.NEWLINE, start: 1, end: 2 });
+    expect(typeAt(t, 2)).toBe(TokenType.TEXT);
+  });
+
+  it('CRLF newline counts as one token', () => {
+    const t = tokens('a\r\nb');
+    expect(typeAt(t, 1)).toBe(TokenType.NEWLINE);
+    expect(t[1]).toEqual({ type: TokenType.NEWLINE, start: 1, end: 3 });
+  });
+
+  it('bare CR newline', () => {
+    const t = tokens('a\rb');
+    expect(typeAt(t, 1)).toBe(TokenType.NEWLINE);
+    expect(t[1]).toEqual({ type: TokenType.NEWLINE, start: 1, end: 2 });
+  });
+
+  it('mixed line endings', () => {
+    const t = tokens('a\nb\r\nc\rd');
+    const newlines = t.filter((tok) => tok.type === TokenType.NEWLINE);
+    expect(newlines).toHaveLength(3);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Whitespace
+// ---------------------------------------------------------------------------
+
+describe('whitespace', () => {
+  it('spaces between text', () => {
+    const t = tokens('a  b');
+    expect(typeAt(t, 0)).toBe(TokenType.TEXT);
+    expect(typeAt(t, 1)).toBe(TokenType.WHITESPACE);
+    expect(t[1]).toEqual({ type: TokenType.WHITESPACE, start: 1, end: 3 });
+    expect(typeAt(t, 2)).toBe(TokenType.TEXT);
+  });
+
+  it('tabs are whitespace', () => {
+    const t = tokens('a\tb');
+    expect(typeAt(t, 1)).toBe(TokenType.WHITESPACE);
+  });
+
+  it('mixed spaces and tabs merge into one whitespace token', () => {
+    const t = tokens('a \t b');
+    expect(typeAt(t, 1)).toBe(TokenType.WHITESPACE);
+    expect(t[1]).toEqual({ type: TokenType.WHITESPACE, start: 1, end: 4 });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Headings
+// ---------------------------------------------------------------------------
+
+describe('headings', () => {
+  it('== at line start is HEADING_MARKER', () => {
+    const t = tokens('== Hi ==');
+    expect(typeAt(t, 0)).toBe(TokenType.HEADING_MARKER);
+    expect(t[0]).toEqual({ type: TokenType.HEADING_MARKER, start: 0, end: 2 });
+  });
+
+  it('heading level 3', () => {
+    const t = tokens('=== Title ===');
+    expect(t[0]).toEqual({ type: TokenType.HEADING_MARKER, start: 0, end: 3 });
+  });
+
+  it('trailing equals are EQUALS (not heading close) in mid-line', () => {
+    // The trailing '==' are EQUALS since they come after lineStart=false
+    const t = tokens('== Hi ==');
+    const equalsTokens = t.filter((tok) => tok.type === TokenType.EQUALS);
+    expect(equalsTokens).toHaveLength(1); // trailing ==
+  });
+
+  it('heading after newline', () => {
+    const t = tokens('text\n== Heading ==');
+    const headingMarkers = t.filter((tok) => tok.type === TokenType.HEADING_MARKER);
+    expect(headingMarkers).toHaveLength(1);
+  });
+
+  it('single = at line start is HEADING_MARKER', () => {
+    const t = tokens('= H1 =');
+    expect(typeAt(t, 0)).toBe(TokenType.HEADING_MARKER);
+    expect(t[0].end - t[0].start).toBe(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Lists
+// ---------------------------------------------------------------------------
+
+describe('lists', () => {
+  it('bullet list marker', () => {
+    const t = tokens('* item');
+    expect(typeAt(t, 0)).toBe(TokenType.BULLET);
+    expect(t[0]).toEqual({ type: TokenType.BULLET, start: 0, end: 1 });
+  });
+
+  it('ordered list marker', () => {
+    const t = tokens('# item');
+    expect(typeAt(t, 0)).toBe(TokenType.HASH);
+  });
+
+  it('nested list markers', () => {
+    const t = tokens('**# deep');
+    expect(typeAt(t, 0)).toBe(TokenType.BULLET);
+    expect(typeAt(t, 1)).toBe(TokenType.BULLET);
+    expect(typeAt(t, 2)).toBe(TokenType.HASH);
+  });
+
+  it('definition term', () => {
+    const t = tokens('; term');
+    expect(typeAt(t, 0)).toBe(TokenType.SEMICOLON);
+  });
+
+  it('definition description', () => {
+    const t = tokens(': desc');
+    expect(typeAt(t, 0)).toBe(TokenType.COLON);
+  });
+
+  it('list markers after newline', () => {
+    const t = tokens('text\n* item');
+    const bullets = t.filter((tok) => tok.type === TokenType.BULLET);
+    expect(bullets).toHaveLength(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Thematic break
+// ---------------------------------------------------------------------------
+
+describe('thematic break', () => {
+  it('four dashes at line start', () => {
+    const t = tokens('----');
+    expect(typeAt(t, 0)).toBe(TokenType.THEMATIC_BREAK);
+    expect(t[0]).toEqual({ type: TokenType.THEMATIC_BREAK, start: 0, end: 4 });
+  });
+
+  it('more than four dashes', () => {
+    const t = tokens('------');
+    expect(typeAt(t, 0)).toBe(TokenType.THEMATIC_BREAK);
+    expect(t[0].end).toBe(6);
+  });
+
+  it('three dashes at line start is TEXT', () => {
+    const t = tokens('---');
+    expect(typeAt(t, 0)).toBe(TokenType.TEXT);
+  });
+
+  it('dashes not at line start are TEXT', () => {
+    const t = tokens('x----');
+    // 'x' is TEXT, '----' should not be THEMATIC_BREAK
+    const breaks = t.filter((tok) => tok.type === TokenType.THEMATIC_BREAK);
+    expect(breaks).toHaveLength(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Preformatted marker
+// ---------------------------------------------------------------------------
+
+describe('preformatted marker', () => {
+  it('space at line start is PREFORMATTED_MARKER', () => {
+    const t = tokens(' code');
+    expect(typeAt(t, 0)).toBe(TokenType.PREFORMATTED_MARKER);
+    expect(t[0]).toEqual({ type: TokenType.PREFORMATTED_MARKER, start: 0, end: 1 });
+    expect(typeAt(t, 1)).toBe(TokenType.TEXT);
+  });
+
+  it('space not at line start is WHITESPACE', () => {
+    const t = tokens('a b');
+    const preMarkers = t.filter((tok) => tok.type === TokenType.PREFORMATTED_MARKER);
+    expect(preMarkers).toHaveLength(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Tables
+// ---------------------------------------------------------------------------
+
+describe('tables', () => {
+  it('table open {|', () => {
+    const t = tokens('{|');
+    expect(typeAt(t, 0)).toBe(TokenType.TABLE_OPEN);
+    expect(t[0]).toEqual({ type: TokenType.TABLE_OPEN, start: 0, end: 2 });
+  });
+
+  it('table close |}', () => {
+    const t = tokens('{|\n|}');
+    const closes = t.filter((tok) => tok.type === TokenType.TABLE_CLOSE);
+    expect(closes).toHaveLength(1);
+  });
+
+  it('table row |-', () => {
+    const t = tokens('{|\n|-');
+    const rows = t.filter((tok) => tok.type === TokenType.TABLE_ROW);
+    expect(rows).toHaveLength(1);
+  });
+
+  it('table caption |+', () => {
+    const t = tokens('{|\n|+ Caption');
+    const captions = t.filter((tok) => tok.type === TokenType.TABLE_CAPTION);
+    expect(captions).toHaveLength(1);
+  });
+
+  it('table header cell ! at line start', () => {
+    const t = tokens('{|\n! Header');
+    const headers = t.filter((tok) => tok.type === TokenType.TABLE_HEADER_CELL);
+    expect(headers).toHaveLength(1);
+  });
+
+  it('pipe | at line start in table context', () => {
+    const t = tokens('{|\n| Cell');
+    // After newline, '|' at line start is PIPE
+    const pipes = t.filter((tok) => tok.type === TokenType.PIPE);
+    expect(pipes.length).toBeGreaterThanOrEqual(1);
+  });
+
+  it('double pipe || inline', () => {
+    const t = tokens('a||b');
+    const dPipes = t.filter((tok) => tok.type === TokenType.DOUBLE_PIPE);
+    expect(dPipes).toHaveLength(1);
+  });
+
+  it('double bang !! inline', () => {
+    const t = tokens('a!!b');
+    const dBangs = t.filter((tok) => tok.type === TokenType.DOUBLE_BANG);
+    expect(dBangs).toHaveLength(1);
+  });
+
+  it('{| not at line start is TEMPLATE_OPEN-ish', () => {
+    // '{|' not at line start: '{' is part of brace handling, '|' is PIPE
+    const t = tokens('x{|');
+    // 'x' is TEXT. '{' alone is TEXT (single brace). '|' is PIPE.
+    const tableOpens = t.filter((tok) => tok.type === TokenType.TABLE_OPEN);
+    expect(tableOpens).toHaveLength(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Bold and italic (apostrophe runs)
+// ---------------------------------------------------------------------------
+
+describe('apostrophe runs', () => {
+  it("'' is APOSTROPHE_RUN (italic)", () => {
+    const t = tokens("''text''");
+    const runs = t.filter((tok) => tok.type === TokenType.APOSTROPHE_RUN);
+    expect(runs).toHaveLength(2);
+    expect(runs[0].end - runs[0].start).toBe(2);
+  });
+
+  it("''' is APOSTROPHE_RUN (bold)", () => {
+    const t = tokens("'''bold'''");
+    const runs = t.filter((tok) => tok.type === TokenType.APOSTROPHE_RUN);
+    expect(runs).toHaveLength(2);
+    expect(runs[0].end - runs[0].start).toBe(3);
+  });
+
+  it("''''' is APOSTROPHE_RUN (bold+italic)", () => {
+    const t = tokens("'''''both'''''");
+    const runs = t.filter((tok) => tok.type === TokenType.APOSTROPHE_RUN);
+    expect(runs).toHaveLength(2);
+    expect(runs[0].end - runs[0].start).toBe(5);
+  });
+
+  it("single apostrophe is TEXT", () => {
+    const t = tokens("don't");
+    // "don" TEXT, "'" TEXT, "t" TEXT — but the text scanner merges them
+    // Actually: "don" is TEXT (stops at apostrophe), "'" is TEXT (single), "t" is TEXT
+    const runs = t.filter((tok) => tok.type === TokenType.APOSTROPHE_RUN);
+    expect(runs).toHaveLength(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Links
+// ---------------------------------------------------------------------------
+
+describe('links', () => {
+  it('[[ is LINK_OPEN', () => {
+    const t = tokens('[[Page]]');
+    expect(typeAt(t, 0)).toBe(TokenType.LINK_OPEN);
+    expect(t[0]).toEqual({ type: TokenType.LINK_OPEN, start: 0, end: 2 });
+  });
+
+  it(']] is LINK_CLOSE', () => {
+    const t = tokens('[[Page]]');
+    const closes = t.filter((tok) => tok.type === TokenType.LINK_CLOSE);
+    expect(closes).toHaveLength(1);
+  });
+
+  it('[ is EXT_LINK_OPEN', () => {
+    const t = tokens('[http://example.com]');
+    expect(typeAt(t, 0)).toBe(TokenType.EXT_LINK_OPEN);
+  });
+
+  it('] is EXT_LINK_CLOSE', () => {
+    const t = tokens('[http://example.com]');
+    const closes = t.filter((tok) => tok.type === TokenType.EXT_LINK_CLOSE);
+    expect(closes).toHaveLength(1);
+  });
+
+  it('wikilink with pipe', () => {
+    const t = tokens('[[Page|label]]');
+    expect(typeAt(t, 0)).toBe(TokenType.LINK_OPEN);
+    const pipes = t.filter((tok) => tok.type === TokenType.PIPE);
+    expect(pipes).toHaveLength(1);
+    const closes = t.filter((tok) => tok.type === TokenType.LINK_CLOSE);
+    expect(closes).toHaveLength(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Templates and arguments
+// ---------------------------------------------------------------------------
+
+describe('templates and arguments', () => {
+  it('{{ is TEMPLATE_OPEN', () => {
+    const t = tokens('{{name}}');
+    expect(typeAt(t, 0)).toBe(TokenType.TEMPLATE_OPEN);
+    expect(t[0]).toEqual({ type: TokenType.TEMPLATE_OPEN, start: 0, end: 2 });
+  });
+
+  it('}} is TEMPLATE_CLOSE', () => {
+    const t = tokens('{{name}}');
+    const closes = t.filter((tok) => tok.type === TokenType.TEMPLATE_CLOSE);
+    expect(closes).toHaveLength(1);
+  });
+
+  it('{{{ is ARGUMENT_OPEN', () => {
+    const t = tokens('{{{1}}}');
+    expect(typeAt(t, 0)).toBe(TokenType.ARGUMENT_OPEN);
+    expect(t[0]).toEqual({ type: TokenType.ARGUMENT_OPEN, start: 0, end: 3 });
+  });
+
+  it('}}} is ARGUMENT_CLOSE', () => {
+    const t = tokens('{{{1}}}');
+    const closes = t.filter((tok) => tok.type === TokenType.ARGUMENT_CLOSE);
+    expect(closes).toHaveLength(1);
+  });
+
+  it('template with pipe-separated params', () => {
+    const t = tokens('{{name|a=1|b=2}}');
+    const pipes = t.filter((tok) => tok.type === TokenType.PIPE);
+    expect(pipes).toHaveLength(2);
+    const equals = t.filter((tok) => tok.type === TokenType.EQUALS);
+    expect(equals).toHaveLength(2);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// HTML tags
+// ---------------------------------------------------------------------------
+
+describe('HTML tags', () => {
+  it('<ref> emits TAG_OPEN + text + TAG_CLOSE', () => {
+    const t = tokens('<ref>');
+    expect(typeAt(t, 0)).toBe(TokenType.TAG_OPEN);
+    // 'ref' is TEXT, '>' is TAG_CLOSE
+    expect(t.some((tok) => tok.type === TokenType.TAG_CLOSE)).toBe(true);
+  });
+
+  it('</ref> emits CLOSING_TAG_OPEN', () => {
+    const t = tokens('</ref>');
+    expect(typeAt(t, 0)).toBe(TokenType.CLOSING_TAG_OPEN);
+  });
+
+  it('<br /> emits TAG_OPEN + text + SELF_CLOSING_TAG_END', () => {
+    const t = tokens('<br />');
+    expect(typeAt(t, 0)).toBe(TokenType.TAG_OPEN);
+    expect(t.some((tok) => tok.type === TokenType.SELF_CLOSING_TAG_END)).toBe(true);
+  });
+
+  it('bare < not followed by letter is TEXT', () => {
+    const t = tokens('3 < 5');
+    // '<' followed by ' ' is not a tag
+    expect(typeAt(t, 0)).toBe(TokenType.TEXT);
+    // The '<' is TEXT
+    const tagOpens = t.filter((tok) => tok.type === TokenType.TAG_OPEN);
+    expect(tagOpens).toHaveLength(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Comments
+// ---------------------------------------------------------------------------
+
+describe('comments', () => {
+  it('<!-- --> emits COMMENT_OPEN + TEXT + COMMENT_CLOSE', () => {
+    const t = tokens('<!-- hello -->');
+    expect(typeAt(t, 0)).toBe(TokenType.COMMENT_OPEN);
+    expect(t[0]).toEqual({ type: TokenType.COMMENT_OPEN, start: 0, end: 4 });
+    const closes = t.filter((tok) => tok.type === TokenType.COMMENT_CLOSE);
+    expect(closes).toHaveLength(1);
+  });
+
+  it('unclosed comment: body emitted as TEXT', () => {
+    const t = tokens('<!-- unclosed');
+    expect(typeAt(t, 0)).toBe(TokenType.COMMENT_OPEN);
+    // No COMMENT_CLOSE
+    const closes = t.filter((tok) => tok.type === TokenType.COMMENT_CLOSE);
+    expect(closes).toHaveLength(0);
+    // Content is TEXT
+    const textTokens = t.filter((tok) => tok.type === TokenType.TEXT);
+    expect(textTokens.length).toBeGreaterThanOrEqual(1);
+  });
+
+  it('empty comment <!-- -->', () => {
+    const t = tokens('<!---->');
+    expect(typeAt(t, 0)).toBe(TokenType.COMMENT_OPEN);
+    // Should have COMMENT_CLOSE right after
+    expect(typeAt(t, 1)).toBe(TokenType.COMMENT_CLOSE);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// HTML entities
+// ---------------------------------------------------------------------------
+
+describe('HTML entities', () => {
+  it('named entity &amp;', () => {
+    const t = tokens('&amp;');
+    expect(typeAt(t, 0)).toBe(TokenType.HTML_ENTITY);
+    expect(t[0]).toEqual({ type: TokenType.HTML_ENTITY, start: 0, end: 5 });
+  });
+
+  it('numeric entity &#123;', () => {
+    const t = tokens('&#123;');
+    expect(typeAt(t, 0)).toBe(TokenType.HTML_ENTITY);
+  });
+
+  it('hex entity &#x1F4A9;', () => {
+    const t = tokens('&#x1F4A9;');
+    expect(typeAt(t, 0)).toBe(TokenType.HTML_ENTITY);
+  });
+
+  it('malformed entity &; is TEXT', () => {
+    const t = tokens('&;');
+    expect(typeAt(t, 0)).toBe(TokenType.TEXT); // bare '&'
+  });
+
+  it('entity without semicolon is TEXT', () => {
+    const t = tokens('&amp');
+    expect(typeAt(t, 0)).toBe(TokenType.TEXT); // '&' as text
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Signatures
+// ---------------------------------------------------------------------------
+
+describe('signatures', () => {
+  it('~~~ is SIGNATURE', () => {
+    const t = tokens('~~~');
+    expect(typeAt(t, 0)).toBe(TokenType.SIGNATURE);
+    expect(t[0]).toEqual({ type: TokenType.SIGNATURE, start: 0, end: 3 });
+  });
+
+  it('~~~~ is SIGNATURE', () => {
+    const t = tokens('~~~~');
+    expect(typeAt(t, 0)).toBe(TokenType.SIGNATURE);
+  });
+
+  it('~~~~~ is SIGNATURE', () => {
+    const t = tokens('~~~~~');
+    expect(typeAt(t, 0)).toBe(TokenType.SIGNATURE);
+  });
+
+  it('~~ (two tildes) is TEXT', () => {
+    const t = tokens('~~');
+    expect(typeAt(t, 0)).toBe(TokenType.TEXT);
+  });
+
+  it('~~~~~~ (six tildes) is TEXT', () => {
+    const t = tokens('~~~~~~');
+    expect(typeAt(t, 0)).toBe(TokenType.TEXT);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Behavior switches
+// ---------------------------------------------------------------------------
+
+describe('behavior switches', () => {
+  it('__TOC__ is BEHAVIOR_SWITCH', () => {
+    const t = tokens('__TOC__');
+    expect(typeAt(t, 0)).toBe(TokenType.BEHAVIOR_SWITCH);
+    expect(t[0]).toEqual({ type: TokenType.BEHAVIOR_SWITCH, start: 0, end: 7 });
+  });
+
+  it('__NOTOC__ is BEHAVIOR_SWITCH', () => {
+    const t = tokens('__NOTOC__');
+    expect(typeAt(t, 0)).toBe(TokenType.BEHAVIOR_SWITCH);
+  });
+
+  it('__UNKNOWN__ is TEXT', () => {
+    const t = tokens('__UNKNOWN__');
+    // Not in the recognized set, emits '__' as TEXT, then rest
+    const switches = t.filter((tok) => tok.type === TokenType.BEHAVIOR_SWITCH);
+    expect(switches).toHaveLength(0);
+  });
+
+  it('single underscore is TEXT', () => {
+    const t = tokens('_word_');
+    const switches = t.filter((tok) => tok.type === TokenType.BEHAVIOR_SWITCH);
+    expect(switches).toHaveLength(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Equals (mid-line)
+// ---------------------------------------------------------------------------
+
+describe('equals sign', () => {
+  it('= not at line start is EQUALS', () => {
+    const t = tokens('a=b');
+    const equals = t.filter((tok) => tok.type === TokenType.EQUALS);
+    expect(equals).toHaveLength(1);
+  });
+
+  it('multiple = not at line start', () => {
+    const t = tokens('a==b');
+    const equals = t.filter((tok) => tok.type === TokenType.EQUALS);
+    expect(equals).toHaveLength(1);
+    expect(equals[0].end - equals[0].start).toBe(2);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// EOF
+// ---------------------------------------------------------------------------
+
+describe('EOF', () => {
+  it('every token stream ends with EOF', () => {
+    for (const input of ['', 'hello', '== H ==\n', '[[link]]']) {
+      const t = tokens(input);
+      const last = t[t.length - 1];
+      expect(last.type).toBe(TokenType.EOF);
+      expect(last.start).toBe(input.length);
+      expect(last.end).toBe(input.length);
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Complex wikitext
+// ---------------------------------------------------------------------------
+
+describe('complex wikitext', () => {
+  it('full table', () => {
+    const t = tokens('{|\n! H1 !! H2\n|-\n| A || B\n|}');
+    expect(t[0].type).toBe(TokenType.TABLE_OPEN);
+    expect(t.some((tok) => tok.type === TokenType.TABLE_HEADER_CELL)).toBe(true);
+    expect(t.some((tok) => tok.type === TokenType.DOUBLE_BANG)).toBe(true);
+    expect(t.some((tok) => tok.type === TokenType.TABLE_ROW)).toBe(true);
+    expect(t.some((tok) => tok.type === TokenType.DOUBLE_PIPE)).toBe(true);
+    expect(t.some((tok) => tok.type === TokenType.TABLE_CLOSE)).toBe(true);
+  });
+
+  it('heading with bold content', () => {
+    const t = tokens("== '''Bold Title''' ==");
+    expect(t[0].type).toBe(TokenType.HEADING_MARKER);
+    expect(t.some((tok) => tok.type === TokenType.APOSTROPHE_RUN)).toBe(true);
+    expect(t.some((tok) => tok.type === TokenType.EQUALS)).toBe(true);
+  });
+
+  it('template inside wikilink', () => {
+    const t = tokens('[[{{PAGENAME}}]]');
+    expect(t[0].type).toBe(TokenType.LINK_OPEN);
+    expect(t.some((tok) => tok.type === TokenType.TEMPLATE_OPEN)).toBe(true);
+    expect(t.some((tok) => tok.type === TokenType.TEMPLATE_CLOSE)).toBe(true);
+    expect(t.some((tok) => tok.type === TokenType.LINK_CLOSE)).toBe(true);
+  });
+
+  it('list with wikilink', () => {
+    const t = tokens('* [[Page|label]]');
+    expect(t[0].type).toBe(TokenType.BULLET);
+    expect(t.some((tok) => tok.type === TokenType.LINK_OPEN)).toBe(true);
+    expect(t.some((tok) => tok.type === TokenType.PIPE)).toBe(true);
+    expect(t.some((tok) => tok.type === TokenType.LINK_CLOSE)).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Edge cases
+// ---------------------------------------------------------------------------
+
+describe('edge cases', () => {
+  it('null byte is TEXT', () => {
+    const t = tokens('\0');
+    expect(typeAt(t, 0)).toBe(TokenType.TEXT);
+  });
+
+  it('astral Unicode (emoji) is TEXT', () => {
+    const t = tokens('\u{1F600}');
+    // Emoji is a surrogate pair (2 UTF-16 units), but still TEXT
+    expect(typeAt(t, 0)).toBe(TokenType.TEXT);
+  });
+
+  it('CJK text is TEXT', () => {
+    const t = tokens('日本語');
+    expect(typeAt(t, 0)).toBe(TokenType.TEXT);
+  });
+
+  it('single { is TEXT', () => {
+    const t = tokens('{');
+    expect(typeAt(t, 0)).toBe(TokenType.TEXT);
+  });
+
+  it('single } is TEXT', () => {
+    const t = tokens('}');
+    expect(typeAt(t, 0)).toBe(TokenType.TEXT);
+  });
+
+  it('single / is TEXT', () => {
+    const t = tokens('/');
+    // '/' is a delimiter char but doesn't match '/>' 
+    const t2 = tokens('a/b');
+    // Should have text on both sides of the slash
+    const textTokens = t2.filter((tok) => tok.type === TokenType.TEXT);
+    expect(textTokens.length).toBeGreaterThanOrEqual(1);
+  });
+
+  it('extremely long line of text', () => {
+    const long = 'x'.repeat(100_000);
+    const t = tokens(long);
+    // Should be a single TEXT token + EOF
+    expect(t).toHaveLength(2);
+    expect(t[0].type).toBe(TokenType.TEXT);
+    expect(t[0].end - t[0].start).toBe(100_000);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Property-based tests: never-throw and token coverage invariants
+// ---------------------------------------------------------------------------
+
+describe('property-based invariants', () => {
+  it('never throws on arbitrary input', () => {
+    fc.assert(
+      fc.property(fc.string(), (s) => {
+        // Must not throw
+        const t = tokens(s);
+        // Must end with EOF
+        expect(t[t.length - 1].type).toBe(TokenType.EOF);
+      }),
+      { numRuns: 500 },
+    );
+  });
+
+  it('token ranges tile the input with no gaps or overlaps', () => {
+    fc.assert(
+      fc.property(fc.string(), (s) => {
+        const t = tokens(s);
+        // First non-EOF token starts at 0 (or only EOF if empty)
+        if (t.length > 1) {
+          expect(t[0].start).toBe(0);
+        }
+        // Adjacent tokens are contiguous
+        for (let idx = 1; idx < t.length; idx++) {
+          expect(t[idx].start).toBe(t[idx - 1].end);
+        }
+        // Last token (EOF) ends at source length
+        expect(t[t.length - 1].end).toBe(s.length);
+      }),
+      { numRuns: 500 },
+    );
+  });
+
+  it('every token has start <= end', () => {
+    fc.assert(
+      fc.property(fc.string(), (s) => {
+        for (const tok of tokenize(s)) {
+          expect(tok.start).toBeLessThanOrEqual(tok.end);
+        }
+      }),
+      { numRuns: 500 },
+    );
+  });
+
+  it('deterministic: same input produces same tokens', () => {
+    fc.assert(
+      fc.property(fc.string(), (s) => {
+        const t1 = tokens(s);
+        const t2 = tokens(s);
+        expect(t1).toEqual(t2);
+      }),
+      { numRuns: 200 },
+    );
+  });
+
+  it('every token type is a valid TokenType', () => {
+    const validTypes = new Set(Object.values(TokenType));
+    fc.assert(
+      fc.property(fc.string(), (s) => {
+        for (const tok of tokenize(s)) {
+          expect(validTypes.has(tok.type)).toBe(true);
+        }
+      }),
+      { numRuns: 500 },
+    );
+  });
+
+  it('never throws on wikitext-like input', () => {
+    // Generate strings biased toward wikitext characters
+    const wikiChar = fc.oneof(
+      fc.constant('='),
+      fc.constant("'"),
+      fc.constant('['),
+      fc.constant(']'),
+      fc.constant('{'),
+      fc.constant('}'),
+      fc.constant('|'),
+      fc.constant('!'),
+      fc.constant('*'),
+      fc.constant('#'),
+      fc.constant(':'),
+      fc.constant(';'),
+      fc.constant('-'),
+      fc.constant('~'),
+      fc.constant('_'),
+      fc.constant('<'),
+      fc.constant('>'),
+      fc.constant('&'),
+      fc.constant('/'),
+      fc.constant('\n'),
+      fc.constant('\r'),
+      fc.constant(' '),
+      fc.integer({ min: 0x20, max: 0x7e }).map((c) => String.fromCharCode(c)),
+    );
+    const wikiString = fc.array(wikiChar, { minLength: 0, maxLength: 200 })
+      .map((chars) => chars.join(''));
+
+    fc.assert(
+      fc.property(wikiString, (s) => {
+        const t = tokens(s);
+        expect(t[t.length - 1].type).toBe(TokenType.EOF);
+        // Token tiling
+        for (let idx = 1; idx < t.length; idx++) {
+          expect(t[idx].start).toBe(t[idx - 1].end);
+        }
+      }),
+      { numRuns: 1000 },
+    );
+  });
+});

@@ -35,6 +35,7 @@ import {
   isToken,
   textEvent,
   tokenEvent,
+  tokenize,
 } from './mod.ts';
 
 /** A minimal Position for benchmarks. */
@@ -83,6 +84,67 @@ summary(() => {
 
   bench('errorEvent()', () => {
     do_not_optimize(errorEvent('Malformed inline run', pos));
+  });
+});
+
+// --- Tokenizer benchmarks ---
+// The tokenizer is the hottest path in the parser pipeline:
+// it scans every character of the input. These benchmarks measure
+// throughput on representative wikitext inputs.
+
+const PLAIN_TEXT = 'The quick brown fox jumps over the lazy dog. '.repeat(200);
+const HEADING_TEXT = '== Section ==\nParagraph text here.\n'.repeat(100);
+const TABLE_TEXT = '{|\n! H1 !! H2\n|-\n| A || B\n|-\n| C || D\n|}\n'.repeat(50);
+const LINK_TEXT = "See [[Main Page|home]], '''bold''' and ''italic'' text.\n".repeat(100);
+const TEMPLATE_TEXT = '{{Infobox|name={{{1}}}|value={{{2|default}}}}}\n'.repeat(100);
+const MIXED_TEXT = [
+  '== Heading ==',
+  "'''Bold''' and ''italic'' and '''''both'''''.",
+  '* Bullet item',
+  '# Ordered item',
+  ': Indented',
+  '{|',
+  '! Header',
+  '|-',
+  '| [[Page|link]] || {{template|arg=val}}',
+  '|}',
+  '----',
+  '<!-- comment -->',
+  '&amp; &#123; &#x1F4A9;',
+  '~~~~ __TOC__',
+  '',
+].join('\n').repeat(50);
+
+/** Drain a generator by consuming all yielded values. */
+function drainTokenize(input: string) {
+  for (const _tok of tokenize(input)) {
+    // consume
+  }
+}
+
+summary(() => {
+  bench('tokenize: plain text (9 KB)', () => {
+    do_not_optimize(drainTokenize(PLAIN_TEXT));
+  });
+
+  bench('tokenize: headings + paragraphs (3 KB)', () => {
+    do_not_optimize(drainTokenize(HEADING_TEXT));
+  });
+
+  bench('tokenize: tables (3.5 KB)', () => {
+    do_not_optimize(drainTokenize(TABLE_TEXT));
+  });
+
+  bench('tokenize: links + bold/italic (5.5 KB)', () => {
+    do_not_optimize(drainTokenize(LINK_TEXT));
+  });
+
+  bench('tokenize: templates + arguments (4.6 KB)', () => {
+    do_not_optimize(drainTokenize(TEMPLATE_TEXT));
+  });
+
+  bench('tokenize: mixed wikitext (7.5 KB)', () => {
+    do_not_optimize(drainTokenize(MIXED_TEXT));
   });
 });
 
