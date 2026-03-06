@@ -45,14 +45,14 @@ npm install @okikio/wikitext
 import { parse, stringify, events, outlineEvents } from '@okikio/wikitext';
 
 // Parse wikitext into an AST
-const tree = parse('== Heading ==\n\nA paragraph with '''bold''' text.');
+const tree = parse('== Heading ==\n\nA paragraph with \'\'\'bold\'\'\' text.');
 
 // Round-trip back to wikitext
 const wikitext = stringify(tree);
 
 // Stream events without building a tree
 for (const evt of events('== Heading ==\n\nSome text.')) {
-  console.log(evt.kind, evt.node_type ?? evt.value);
+  console.log(evt.kind, evt.node_type ?? '');
 }
 
 // Block-only events (cheapest structured path)
@@ -61,6 +61,36 @@ for (const evt of outlineEvents(largeArticle)) {
     toc.push(evt);
   }
 }
+```
+
+> **Note:** `parse()`, `stringify()`, `events()`, and `outlineEvents()` are not
+> yet implemented. The foundational type system (TextSource, Token, events, AST
+> nodes) is complete and published. The tokenizer, parsers, tree builder,
+> stringifier, and filter utilities are under active development.
+
+You can already use the type system and builder functions:
+
+```ts
+import type { TextSource, WikitextEvent, WikistNode } from '@okikio/wikitext';
+import { TokenType, isToken, root, heading, text } from '@okikio/wikitext';
+
+// A plain string satisfies the TextSource interface
+const source: TextSource = '== Heading ==\nSome text.';
+source.charCodeAt(0); // 61 (code for '=')
+
+// Build a wikist tree programmatically using builder functions
+const tree = root([
+  heading(2, [text('Heading')]),
+]);
+tree.type;                    // 'root'
+tree.children[0].type;        // 'heading'
+
+// Token type constants are string literals, not opaque numbers
+TokenType.HEADING_MARKER;     // 'HEADING_MARKER'
+TokenType.TEXT;                // 'TEXT'
+
+// Type guard for runtime validation
+isToken({ type: TokenType.TEXT, start: 0, end: 5 }); // true
 ```
 
 ## Architecture
@@ -81,18 +111,64 @@ lowest-cost consumers (search, grep). The event stream adds structure
 (enter/exit pairs). The tree builder, HTML compiler, and filter utilities are all
 event consumers.
 
+### Pipeline modules
+
+| Module | Purpose | Status |
+|--------|---------|--------|
+| `text_source.ts` | Abstracts the backing text store (string, rope, CRDT) | Published |
+| `token.ts` | Token type constants and `Token` interface | Published |
+| `events.ts` | Event stream types, constructors, and type guards | Published |
+| `ast.ts` | Wikist AST node types, type guards, and builders | Published |
+| `tokenizer.ts` | `charCodeAt` scanner over `TextSource` | Not yet implemented |
+| `block_parser.ts` | Block-level event emitter | Not yet implemented |
+| `inline_parser.ts` | Inline event enrichment | Not yet implemented |
+| `parse.ts` | Orchestration (tokenizer, block, inline, tree) | Not yet implemented |
+| `tree_builder.ts` | `buildTree(events)` to `WikistRoot` | Not yet implemented |
+| `stringify.ts` | AST to wikitext (round-trip) | Not yet implemented |
+| `filter.ts` | Filter/visit for tree and event streams | Not yet implemented |
+| `session.ts` | Stateful `Session` wrapper for incremental use | Not yet implemented |
+
 ## API
+
+### Parsing and serialization
 
 | Function | Description |
 |----------|-------------|
-| `parse(input)` | Parse wikitext into a `WikistRoot` AST |
-| `stringify(tree)` | Serialize a wikist tree back to wikitext |
-| `events(input)` | Full event stream (block + inline) |
-| `outlineEvents(input)` | Block-only event stream (no inline parsing) |
-| `tokens(input)` | Raw token stream |
-| `buildTree(events)` | Build AST from an event iterable |
-| `filter(tree, type)` | Get all nodes of a type (recursive) |
-| `visit(tree, visitor)` | unist-compatible tree walker |
+| `parse(input)` | Parse wikitext into a `WikistRoot` AST. _Not yet implemented._ |
+| `stringify(tree)` | Serialize a wikist tree back to wikitext. _Not yet implemented._ |
+| `events(input)` | Full event stream (block + inline). _Not yet implemented._ |
+| `outlineEvents(input)` | Block-only event stream (no inline parsing). _Not yet implemented._ |
+| `parseChunked(chunks)` | Progressive completed block nodes (async). _Not yet implemented._ |
+
+### Low-level streams
+
+| Function | Description |
+|----------|-------------|
+| `tokens(input)` | Raw token stream. _Not yet implemented._ |
+| `buildTree(events)` | Build AST from an event iterable. _Not yet implemented._ |
+
+### Tree utilities
+
+| Function | Description |
+|----------|-------------|
+| `filter(tree, type)` | Get all nodes of a type (recursive). _Not yet implemented._ |
+| `visit(tree, visitor)` | unist-compatible tree walker. _Not yet implemented._ |
+
+### Foundation (available now)
+
+| Export | Module | Description |
+|--------|--------|-------------|
+| `TextSource` | `text_source.ts` | Interface for backing text stores |
+| `slice()` | `text_source.ts` | Resolve offset range to string |
+| `TokenType` | `token.ts` | Constant map of all token types |
+| `Token` | `token.ts` | Token interface (type + start/end offsets) |
+| `isToken()` | `token.ts` | Type guard for Token validation |
+| `WikitextEvent` | `events.ts` | Discriminated union of 5 event kinds |
+| `enterEvent()`, `exitEvent()`, ... | `events.ts` | Event constructors |
+| `isEnterEvent()`, `isExitEvent()`, ... | `events.ts` | Event type guards |
+| `WikistNode` | `ast.ts` | Discriminated union of 37 node types |
+| `root()`, `heading()`, `text()`, ... | `ast.ts` | AST builder functions |
+| `isRoot()`, `isHeading()`, `isParent()`, ... | `ast.ts` | AST type guards |
 
 ## Contributing
 
