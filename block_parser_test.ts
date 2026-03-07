@@ -11,6 +11,12 @@ import { describe, it } from 'jsr:@std/testing/bdd';
 import { expect } from 'jsr:@std/expect';
 import * as fc from 'npm:fast-check';
 
+import {
+  odd_character_wikitext_string,
+  pathological_wikitext_string,
+  spacing_heavy_wikitext_string,
+  wikiish_string,
+} from './_test_utils/arbitraries.ts';
 import { tokenize } from './tokenizer.ts';
 import { blockEvents } from './block_parser.ts';
 import type { WikitextEvent, EnterEvent, ExitEvent } from './events.ts';
@@ -115,6 +121,18 @@ describe('blockEvents — headings', () => {
       (e): e is EnterEvent => e.kind === 'enter' && e.node_type === 'heading',
     );
     expect(headings.length).toBe(2);
+  });
+
+  it('trims only the outer heading padding while preserving internal spacing', () => {
+    const input = '==  spaced  title  ==';
+    const events = parse(input);
+
+    // Heading parsing is intentionally forgiving about extra outer spaces, but it
+    // should not normalize away the author's internal text spacing. This test
+    // captures that exact boundary so later cleanup work does not silently turn
+    // heading parsing into a content rewriter.
+
+    expect(textContent(events, input).join('')).toBe('spaced  title');
   });
 });
 
@@ -550,18 +568,8 @@ describe('blockEvents — property-based', () => {
   });
 
   it('wikitext-shaped input produces valid events', () => {
-    // Generate strings that look more like wikitext.
-    const wikiChars = fc.string(
-      fc.constantFrom(
-        '=', '*', '#', ';', ':', '|', '!', '-', ' ', '\n',
-        '{', '}', '[', ']', '<', '>', '&', "'", '~', '_',
-        'a', 'b', 'c', '1', '2', '+',
-      ),
-      { minLength: 0, maxLength: 200 },
-    );
-
     fc.assert(
-      fc.property(wikiChars, (s) => {
+      fc.property(wikiish_string(), (s) => {
         const events = parse(s);
         const stack: string[] = [];
         for (const evt of events) {
@@ -574,6 +582,75 @@ describe('blockEvents — property-based', () => {
         expect(stack.length).toBe(0);
       }),
       { numRuns: 500 },
+    );
+  });
+
+  it('spacing-heavy inputs still produce balanced block events', () => {
+    fc.assert(
+      fc.property(spacing_heavy_wikitext_string(), (s) => {
+        // Block parsing is where spacing matters most because line-start markers,
+        // blank lines, and preformatted lines all compete. This property checks
+        // that those decisions stay recoverable instead of corrupting nesting.
+        const events = parse(s);
+        const stack: string[] = [];
+
+        for (const evt of events) {
+          if (evt.kind === 'enter') stack.push(evt.node_type);
+          else if (evt.kind === 'exit') {
+            const top = stack.pop();
+            expect(top).toBe(evt.node_type);
+          }
+        }
+
+        expect(stack).toHaveLength(0);
+      }),
+      { numRuns: 400 },
+    );
+  });
+
+  it('valid syntax with odd unicode payloads still produces balanced block events', () => {
+    fc.assert(
+      fc.property(odd_character_wikitext_string(), (s) => {
+        // These inputs are mostly valid constructs with strange payload text. The
+        // block parser should remain forgiving because delimiter placement stays
+        // sane even when the content inside those blocks is unusual.
+        const events = parse(s);
+        const stack: string[] = [];
+
+        for (const evt of events) {
+          if (evt.kind === 'enter') stack.push(evt.node_type);
+          else if (evt.kind === 'exit') {
+            const top = stack.pop();
+            expect(top).toBe(evt.node_type);
+          }
+        }
+
+        expect(stack).toHaveLength(0);
+      }),
+      { numRuns: 300 },
+    );
+  });
+
+  it('pathological mixed input still produces balanced block events', () => {
+    fc.assert(
+      fc.property(pathological_wikitext_string(), (s) => {
+        // The block parser is allowed to recover conservatively, but it is not
+        // allowed to break stack discipline. Even ugly mixed input must still
+        // yield a usable enter/exit structure.
+        const events = parse(s);
+        const stack: string[] = [];
+
+        for (const evt of events) {
+          if (evt.kind === 'enter') stack.push(evt.node_type);
+          else if (evt.kind === 'exit') {
+            const top = stack.pop();
+            expect(top).toBe(evt.node_type);
+          }
+        }
+
+        expect(stack).toHaveLength(0);
+      }),
+      { numRuns: 400 },
     );
   });
 });
@@ -628,5 +705,67 @@ describe('blockEvents — edge cases', () => {
     const struct = structure(events);
     expect(struct).toContainEqual(['enter', 'heading']);
     expect(struct).toContainEqual(['enter', 'paragraph']);
+  });
+
+  it('treats a leading space before heading syntax as preformatted instead of heading markup', () => {
+    const input = ' == Not a heading ==';
+    const events = parse(input);
+    const struct = structure(events);
+
+    // At block level, column 0 matters. A single leading space changes the line
+    // into preformatted content, so the parser should not reinterpret the later
+    // equals signs as a heading opener after that decision has already been made.
+
+    expect(struct).toContainEqual(['enter', 'preformatted']);
+    expect(struct).not.toContainEqual(['enter', 'heading']);
+  });
+
+  it('treats a leading backslash before block delimiters as literal paragraph text', () => {
+    const input = '\\== Not a heading ==\n\\* not a list item';
+    const events = parse(input);
+    const struct = structure(events);
+    const text = textContent(events, input).join('');
+
+    // The parser has no generic backslash-escape mode. The important current
+    // behavior is simpler: the backslash becomes real content at column 0, so the
+    // later `==` and `*` no longer sit at a block-start position. This is a
+    // reasonable test because block parsing here is position-driven, not escape-
+    // driven.
+
+    expect(struct).toContainEqual(['enter', 'paragraph']);
+    expect(struct).not.toContainEqual(['enter', 'heading']);
+    expect(struct).not.toContainEqual(['enter', 'list']);
+    expect(text).toContain('\\== Not a heading ==');
+    expect(text).toContain('\\* not a list item');
+  });
+
+  it('treats markdown fenced code blocks as ordinary paragraph text', () => {
+    const input = '```md\n[[Not a link]]\n{{NotATemplate}}\n```';
+    const events = parse(input);
+    const struct = structure(events);
+
+    // Fenced code blocks are markdown syntax, not wikitext syntax. Since this
+    // parser does not implement markdown mode switching, the reasonable block
+    // behavior is to leave the content in an ordinary paragraph.
+
+    expect(struct).toContainEqual(['enter', 'paragraph']);
+    expect(struct).not.toContainEqual(['enter', 'preformatted']);
+    expect(textContent(events, input).join('')).toContain('```md');
+  });
+
+  it('keeps valid block structure when text payload contains odd unicode characters', () => {
+    const input = '== Caf\u0301e\u2060Title ==\n* item \u{1F9EA}';
+    const events = parse(input);
+    const struct = structure(events);
+    const text = textContent(events, input).join('');
+
+    // These characters are unusual, but the surrounding wikitext is valid. The
+    // parser should still recover the same block shapes because odd payload text
+    // is content, not a reason to abandon heading or list recognition.
+
+    expect(struct).toContainEqual(['enter', 'heading']);
+    expect(struct).toContainEqual(['enter', 'list']);
+    expect(text).toContain('\u2060');
+    expect(text).toContain('\u{1F9EA}');
   });
 });
