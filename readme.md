@@ -65,16 +65,17 @@ for (const evt of outlineEvents(largeArticle)) {
 
 > **Note:** `parse()`, `stringify()`, `events()`, and `outlineEvents()` are not
 > yet implemented. The foundational type system (TextSource, Token, events, AST
-> nodes), the tokenizer, and the block-level parser are complete and published.
-> The inline parser, tree builder, stringifier, and filter utilities are under
-> active development.
+> nodes), the tokenizer, the block-level parser, and the inline event
+> enrichment utility are complete and published. Higher-level orchestration,
+> tree building, stringification, and filter utilities are still under active
+> development.
 
-You can already use the type system, builder functions, tokenizer, and block
-parser:
+You can already use the type system, builder functions, tokenizer, block
+parser, and the inline enrichment pass:
 
 ```ts
 import type { TextSource, WikitextEvent, WikistNode } from '@okikio/wikitext';
-import { TokenType, isToken, tokenize, blockEvents, root, heading, text } from '@okikio/wikitext';
+import { TokenType, isToken, tokenize, blockEvents, inlineEvents, root, heading, text } from '@okikio/wikitext';
 
 // Tokenize wikitext into a stream of offset-based tokens
 for (const tok of tokenize('== Heading ==\nSome text.')) {
@@ -93,6 +94,11 @@ for (const evt of blockEvents(source, tokenize(source))) {
   // exit heading
   // enter paragraph
   // ...
+}
+
+// Enrich block text ranges with inline markup
+for (const evt of inlineEvents(source, blockEvents(source, tokenize(source)))) {
+  console.log(evt.kind, evt.node_type ?? '');
 }
 
 // A plain string satisfies the TextSource interface
@@ -142,7 +148,7 @@ event consumers.
 | `ast.ts` | Wikist AST node types, type guards, and builders | Published |
 | `tokenizer.ts` | `charCodeAt` generator scanner over `TextSource` | Published |
 | `block_parser.ts` | Block-level event emitter | Published |
-| `inline_parser.ts` | Inline event enrichment | Not yet implemented |
+| `inline_parser.ts` | Inline event enrichment | Published |
 | `parse.ts` | Orchestration (tokenizer, block, inline, tree) | Not yet implemented |
 | `tree_builder.ts` | `buildTree(events)` to `WikistRoot` | Not yet implemented |
 | `stringify.ts` | AST to wikitext (round-trip) | Not yet implemented |
@@ -167,6 +173,7 @@ event consumers.
 |----------|-------------|
 | `tokenize(input)` | Raw token generator stream. **Available now.** |
 | `blockEvents(source, tokens)` | Block-level event stream from tokens. **Available now.** |
+| `inlineEvents(source, blockEvents)` | Inline event enrichment over block events. **Available now.** |
 | `buildTree(events)` | Build AST from an event iterable. _Not yet implemented._ |
 
 ### Tree utilities
