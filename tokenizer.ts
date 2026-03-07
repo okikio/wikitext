@@ -1,128 +1,72 @@
 /**
- * Generator-based tokenizer that scans a {@linkcode TextSource} and yields
- * offset-based {@linkcode Token} objects.
+ * Generator-based tokenizer for raw wikitext source.
  *
- * The tokenizer is the lowest layer in the parser pipeline. It reads the
- * source character by character using `charCodeAt` (no string allocations
- * in the hot loop) and recognizes all wikitext markup delimiters defined
- * by the {@linkcode TokenType} vocabulary.
+ * This is the first real parsing stage. Its job is simple: walk through the
+ * source from left to right and mark the important character runs it sees.
+ * Think of it as turning one long source string into labeled slices such as:
  *
- * ```
- * TextSource ──► tokenize() ──► Generator<Token>
- *                  │
- *                  │  charCodeAt inner loop
- *                  │  yields offset-based tokens
- *                  │  never throws
- *                  │
- *                  ▼
- *          block parser consumes tokens
- * ```
+ * - plain text
+ * - newline
+ * - `[[`
+ * - `{{`
+ * - `|`
+ * - heading marker runs like `==`
  *
- * ## Single-pass character scanning
+ * It does not decide the full meaning of those pieces yet. For example,
+ * spotting `[[` is not the same as deciding whether the final construct is a
+ * normal wikilink, a category link, or a file link. This stage only marks the
+ * raw source shape. Parser literature often calls this the lexical stage, but
+ * the practical meaning here is just "recognize the text patterns first, then
+ * let later stages decide what they mean together".
  *
- * The tokenizer performs a single left-to-right pass over the source. On
- * each iteration, it reads one character code via `charCodeAt` and decides
- * which token to emit. Two pieces of state drive every decision:
- *
- * - `i`: the current position (UTF-16 code unit offset).
- * - `lineStart`: whether `i` is at the beginning of a line.
- *
- * `lineStart` is the key insight. Wikitext reuses the same characters for
- * different purposes depending on where they appear: `=` at line start
- * means heading, `*` means bullet list, `{|` means table open. The same
- * characters mid-line have different (or no) meaning. One boolean tracks
- * this distinction.
- *
- * Each iteration follows this decision tree (the fast text path at the
- * top handles ~60-80% of characters in a typical article):
+ * The tokenizer runs in one pass and yields tokens lazily:
  *
  * ```
- * read charCodeAt(i)
- *   │
- *   ├─ non-ASCII (>= 128)?       ──► TEXT (fast path: accumulate until delimiter)
- *   ├─ not in DELIMITER table?    ──► TEXT (fast path: same)
- *   │
- *   └─ delimiter ──► switch(code)
- *        ├─ newline (\n, \r)      ──► NEWLINE, set lineStart=true
- *        ├─ space (at line start) ──► PREFORMATTED_MARKER
- *        ├─ space/tab (mid-line)  ──► WHITESPACE (absorb consecutive)
- *        ├─ = (at line start)     ──► HEADING_MARKER (absorb run of =)
- *        ├─ = (mid-line)          ──► EQUALS (absorb run of =)
- *        ├─ * # : ; (line start)  ──► BULLET / HASH / COLON / SEMICOLON
- *        ├─ ---- (4+ at start)    ──► THEMATIC_BREAK
- *        ├─ ! / !!                ──► TABLE_HEADER_CELL / DOUBLE_BANG
- *        ├─ <!-- ... -->          ──► COMMENT_OPEN, TEXT, COMMENT_CLOSE
- *        ├─ < + letter            ──► TAG_OPEN
- *        ├─ </                    ──► CLOSING_TAG_OPEN
- *        ├─ />                    ──► SELF_CLOSING_TAG_END
- *        ├─ >                     ──► TAG_CLOSE
- *        ├─ &...;                 ──► HTML_ENTITY (named, decimal, or hex)
- *        ├─ {{{ / {{ / {|        ──► ARGUMENT_OPEN / TEMPLATE_OPEN / TABLE_OPEN
- *        ├─ }}} / }}              ──► ARGUMENT_CLOSE / TEMPLATE_CLOSE
- *        ├─ [[ / [                ──► LINK_OPEN / EXT_LINK_OPEN
- *        ├─ ]] / ]                ──► LINK_CLOSE / EXT_LINK_CLOSE
- *        ├─ | / || / |} / |- /|+ ──► PIPE / DOUBLE_PIPE / TABLE_CLOSE/ROW/CAPTION
- *        ├─ '' (2+)              ──► APOSTROPHE_RUN
- *        ├─ ~~~ (3-5)            ──► SIGNATURE
- *        ├─ __WORD__             ──► BEHAVIOR_SWITCH
- *        └─ other delimiter       ──► TEXT (fallback)
+ * TextSource -> tokenize() -> Token stream
  * ```
  *
- * The fast text path at the top of the decision tree is the most important
- * optimization. In a typical Wikipedia article, 60-80% of characters are
- * plain prose. The fast path absorbs entire runs of non-delimiter characters in a tight inner
- * loop, yielding one TEXT token for each run. Non-ASCII characters (CJK,
- * emoji, RTL scripts) skip the delimiter check entirely with a single
- * `code >= 128` comparison, which makes articles in those scripts very
- * fast to scan.
+ * The hottest operation in this whole file is `source.charCodeAt(i)`. The
+ * tokenizer calls it over and over while scanning. Using numeric character
+ * codes lets the hot loop compare small numbers instead of creating temporary
+ * one-character strings.
  *
- * Every character in the input belongs to exactly one token. Adjacent
- * tokens share boundaries: `tokens[i].end === tokens[i+1].start`. There
- * are no gaps and no overlaps. This invariant means you can reconstruct
- * the original input by concatenating `source.slice(t.start, t.end)` for
- * every non-EOF token.
+ * The scanner also keeps one small piece of context: whether it is at the
+ * start of a line. Wikitext uses the same characters differently depending on
+ * where they appear. For example:
  *
- * For example, the input `"Hello [[world]]"` tiles as:
+ * - `=` at the start of a line can begin a heading
+ * - `*` at the start of a line can begin a bullet list item
+ * - the same characters in the middle of normal text often mean something else
+ *   or just stay text
+ *
+ * A large chunk of the input is usually ordinary prose. So the fast path is
+ * not the special markup. The fast path is "keep absorbing plain text until we
+ * hit something that could start markup".
+ *
+ * Every code unit in the source belongs to exactly one token range. In plain
+ * English, the token ranges cover the whole input with no holes and no overlap.
+ * If one token ends at offset 12, the next one starts at 12.
+ *
+ * For `Hello [[world]]`, the stream tiles the input like this:
  *
  * ```
- * offset:  0     5 6  7     12 13  15
- *          H e l l o   [  [  w o r l d  ]  ]
- *          ├─TEXT──┤├WS┤├LINK_OPEN┤├TEXT─┤├LINK_CLOSE┤
- *          0      5 5  6 6       7 7   12 12       14
+ * source: H  e  l  l  o     [  [  w  o  r  l  d  ]  ]
+ * index : 0  1  2  3  4  5  6  7  8  9 10 11 12 13 14
+ * token : [0,5) TEXT
+ *         [5,6) WHITESPACE
+ *         [6,8) LINK_OPEN
+ *         [8,13) TEXT
+ *         [13,15) LINK_CLOSE
  * ```
  *
- * ## Structural tokens, not semantic classification
- *
- * The tokenizer identifies the syntactic role of each character sequence
- * but does not assign deeper meaning. Disambiguation (e.g., whether
- * an `APOSTROPHE_RUN` is italic, bold, or both) is deferred to the inline
- * parser. Similarly, `BEHAVIOR_SWITCH` is emitted for any `__WORD__`
- * pattern (letters between double underscores) without checking the word
- * against a known list. Whether a particular word is a recognized switch
- * for a given MediaWiki installation is a later-stage/profile concern.
- *
- * Design constraints:
- *
- * - **Never throw**: any input produces a valid token stream ending in EOF.
- * - **Generator**: tokens are yielded lazily; callers pull on demand.
- * - **Offset-based**: tokens carry `start`/`end` UTF-16 offsets, not strings.
- * - **Fresh objects**: each yielded token is a new object (no reuse across yields).
- * - **Deterministic**: same input always produces the same token sequence.
- * - **Token coverage**: every code unit is covered by exactly one token's range.
- *   Adjacent token ranges tile the entire input with no gaps or overlaps.
+ * The tokenizer never throws. Even malformed input still produces a full token
+ * stream ending in EOF.
  *
  * @example Tokenizing a simple heading
  * ```ts
  * import { tokenize } from './tokenizer.ts';
- * import { TokenType } from './token.ts';
  *
  * const tokens = Array.from(tokenize('== Hi =='));
- * tokens[0]; // { type: 'HEADING_MARKER', start: 0, end: 2 }
- * tokens[1]; // { type: 'WHITESPACE', start: 2, end: 3 }
- * tokens[2]; // { type: 'TEXT', start: 3, end: 5 }
- * tokens[3]; // { type: 'WHITESPACE', start: 5, end: 6 }
- * tokens[4]; // { type: 'HEADING_MARKER_CLOSE', start: 6, end: 8 }
- * tokens[5]; // { type: 'EOF', start: 8, end: 8 }
  * ```
  *
  * @example Tokenizing a wikilink
@@ -131,15 +75,6 @@
  *
  * const tokens = Array.from(tokenize('[[Page|label]]'));
  * // LINK_OPEN, TEXT("Page"), PIPE, TEXT("label"), LINK_CLOSE, EOF
- * ```
- *
- * @example Tokenizing a template call
- * ```ts
- * import { tokenize } from './tokenizer.ts';
- *
- * const tokens = Array.from(tokenize('{{Infobox|name=Test}}'));
- * // TEMPLATE_OPEN, TEXT("Infobox"), PIPE, TEXT("name"),
- * // EQUALS, TEXT("Test"), TEMPLATE_CLOSE, EOF
  * ```
  *
  * @module
