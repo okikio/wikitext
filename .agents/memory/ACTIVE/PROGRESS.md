@@ -4,12 +4,17 @@
 
 - Foundation types complete and published (text_source.ts, token.ts, events.ts, ast.ts)
 - Tokenizer complete (tokenizer.ts) with 118 tests including property-based fuzz
+- Block parser complete (block_parser.ts) with 61 tests including property-based fuzz
+- Phase 3 review complete: 3 bugs fixed, heading parser rewritten, unused vars cleaned
+- Dedicated test files added for events.ts (42 tests), token.ts (31 tests), text_source.ts (61 tests)
 - Educational docs and TSDoc added across all source and test files
 - Documentation quality audit complete (header clarity, opening ledes, intent-grounded comments)
-- Test imports centralized via deno.json import map
+- Test imports use deno-lint-ignore comments with inline jsr:/npm: specifiers (no deno.json import map)
 - Benchmarks GC-annotated for allocation-heavy tokenizer paths
-- Current task: T05 (Block parser implementation, Phase 3) — in progress
+- State snapshot recording deferred to Phase 7 (TODO comment in block_parser.ts)
+- Current task: T06 (Inline parser implementation, Phase 4) — not started
 - Blockers: none
+- Total tests: 448 across 8 test files, 0 failures, 0 compile errors
 
 ## Completed
 
@@ -79,6 +84,38 @@
     PROGRESS.md, TASKS.md
   - `deno task test` passes (253 total tests)
 
+- [x] T05: Implement block parser (Phase 3)
+  - `block_parser.ts`: ~530-line block-level event generator
+  - Handles headings, paragraphs, bullet/ordered/definition lists, tables,
+    thematic breaks, preformatted blocks
+  - Event well-formedness: every enter has a matching exit (stack discipline)
+  - Never-throw: verified with fast-check property-based tests
+  - `block_parser_test.ts`: 61 tests (example-based + property-based)
+  - `mod.ts`: re-exports `blockEvents()`
+  - `deno task test` passes (314 total tests at time of completion)
+
+- [x] T05.5: Phase 3 review, bug fixes, and dedicated test files
+  - Heading parser rewritten from inline-check to collect-then-trim strategy:
+    the tokenizer emits EQUALS (not HEADING_MARKER_CLOSE) for mid-line `==`,
+    so the old approach missed trailing close markers
+  - Fallback positions fixed in closeLevels, closeCell, closeRow: were using
+    `pointAt(buf.tracker, 0)` which gave offset 0 at end of input; now use
+    tracker's current state
+  - List type-switching fixed: `* A\n# B` now closes the bullet list before
+    opening an ordered list at the same depth
+  - Unused variables cleaned up (firstStart, lastEnd, lineStartPt, etc.)
+  - State snapshot recording deferred to Phase 7 with TODO comment
+  - Test imports switched from deno.json import map to deno-lint-ignore
+    comments with inline jsr:/npm: specifiers
+  - Created `events_test.ts` (42 tests): constructors, type guards,
+    ErrorEventOptions merging, property-based round-trips
+  - Created `token_test.ts` (31 tests): 39 token types verified by category,
+    value uniqueness, isToken() with 15+ edge cases, property-based
+  - Created `text_source_test.ts` (61 tests): string conformance, Unicode
+    (CJK, RTL, astral/emoji surrogates), line endings, slice() helper,
+    custom TextSource impl, property-based round-trips
+  - `deno task test` passes (448 total tests)
+
 ## Notes for the next agent
 
 - Conventions:
@@ -91,6 +128,9 @@
   - Event fields use snake_case (node_type, start_offset, etc.)
   - `TextSource` abstraction: plain `string` satisfies it
   - Phases are internal planning only: docs say "not yet implemented"
+  - Test imports use `// deno-lint-ignore-file no-import-prefix no-unversioned-import`
+    with inline `jsr:@std/testing/bdd`, `jsr:@std/expect`, `npm:fast-check` specifiers
+    (there is no deno.json import map)
 - What's implemented:
   - text_source.ts, token.ts, events.ts, ast.ts (all published)
   - tokenizer.ts: generator-based scanner over TextSource
@@ -98,8 +138,16 @@
     definition lists, tables, thematic breaks, preformatted blocks)
   - mod.ts re-exports all of the above
   - Tests: mod_test.ts, ast_test.ts, mod_memory_test.ts, tokenizer_test.ts,
-    block_parser_test.ts (253+ total)
+    block_parser_test.ts, events_test.ts, token_test.ts, text_source_test.ts
+    (448 total tests, 0 failures)
   - Benchmarks: mod_bench.ts (foundations + tokenizer throughput, GC-annotated)
+- Token count: TokenType has 39 entries (not 45 as some older docs say)
+- Block parser notes:
+  - Heading parser uses collect-then-trim: tokenizer emits EQUALS for mid-line
+    `==`, not HEADING_MARKER_CLOSE, so trailing close markers must be trimmed
+    from collected line tokens
+  - State snapshot recording is deferred to Phase 7 (TODO comment in place)
+  - blockEvents() accepts (source: TextSource, tokens: Iterable<Token>)
 - What's NOT implemented yet:
   - inline_parser.ts
   - parse.ts, tree_builder.ts, stringify.ts, filter.ts

@@ -41,6 +41,16 @@
   `{{SomeTemplate}}` (template). Default: parse all non-`#`-prefixed as
   Template. Risk: profiles may need a word list, adding configuration
   burden.
+- **Heading close marker token mismatch (discovered, resolved)**: The
+  tokenizer emits `EQUALS` (not `HEADING_MARKER_CLOSE`) for trailing `==`
+  in headings. The block parser originally checked for `HEADING_MARKER_CLOSE`
+  inline and missed close markers. Resolved by rewriting to a
+  collect-then-trim strategy. Future inline parser work should verify
+  similar assumptions about token types.
+- **State snapshots deferred**: Block boundary state snapshots (needed for
+  incremental reparsing in Phase 7) are not yet recorded. A `TODO(Phase 7)`
+  comment marks the insertion point in `block_parser.ts`. Until Phase 7,
+  incremental reparsing is not possible.
 
 ## Mitigations
 

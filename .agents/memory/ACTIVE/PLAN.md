@@ -46,9 +46,8 @@ See `docs/architecture.md` for the full pipeline design. In summary:
 - **Phase 1**: AST spec (`ast.ts`) + event types (`events.ts`) + `TextSource`
   interface + Token types + range-first event payloads ✅
 - **Phase 2**: Tokenizer (`tokenizer.ts`) over `TextSource` ✅
-- **Phase 3**: Block parser (`block_parser.ts`) + fuzz start ← **next**.
-  Session begins life here: outline overlay is the first live view.
-- **Phase 4**: Inline parser (`inline_parser.ts`)
+- **Phase 3**: Block parser (`block_parser.ts`) + review ✅
+- **Phase 4**: Inline parser (`inline_parser.ts`) ← **next**
 - **Phase 5**: Public API, tree builder, stringify, filter + corpus tests.
   Session-based API lands (`createSession()` with `.events()`, `.outline()`,
   `.parse()`).

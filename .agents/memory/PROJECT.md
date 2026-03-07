@@ -18,7 +18,7 @@ interchange format.
 
 Implemented:
 - `text_source.ts`: `TextSource` interface + `slice()` helper
-- `token.ts`: `TokenType` const-object (45 types), `Token` interface, `isToken()`
+- `token.ts`: `TokenType` const-object (39 types), `Token` interface, `isToken()`
 - `events.ts`: `WikitextEvent` union (5 kinds), constructors, type guards
 - `ast.ts`: 37 wikist node types, type guards, builder functions
 - `tokenizer.ts`: charCodeAt generator-based scanner over TextSource

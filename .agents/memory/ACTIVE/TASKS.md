@@ -58,23 +58,54 @@ Rules:
     - [x] .agents/ files updated (PROJECT, PROGRESS, TASKS)
     - [x] `deno task test` passes (253 tests)
 
-- [ ] T05: Implement block parser (Phase 3)
+- [x] T05: Implement block parser (Phase 3)
   - Why: Block-level structure is the next layer above the tokenizer
   - Done when:
-    - [ ] `block_parser.ts` exports `blockEvents(source, tokens)` generator
-    - [ ] Headings: `== Title ==` emits enter/exit heading with level prop
-    - [ ] Paragraphs: plain text lines accumulate into paragraph blocks
-    - [ ] Bullet lists: `*`, `**` with nesting and list-item events
-    - [ ] Ordered lists: `#`, `##` with nesting and list-item events
-    - [ ] Definition lists: `;` term, `:` description with nesting
-    - [ ] Tables: `{|`, `|}`, `|-`, `|+`, `|`, `||`, `!`, `!!`
-    - [ ] Thematic breaks: `----` emits enter/exit thematic-break
-    - [ ] Preformatted: leading space emits preformatted block
+    - [x] `block_parser.ts` exports `blockEvents(source, tokens)` generator
+    - [x] Headings: `== Title ==` emits enter/exit heading with level prop
+    - [x] Paragraphs: plain text lines accumulate into paragraph blocks
+    - [x] Bullet lists: `*`, `**` with nesting and list-item events
+    - [x] Ordered lists: `#`, `##` with nesting and list-item events
+    - [x] Definition lists: `;` term, `:` description with nesting
+    - [x] Tables: `{|`, `|}`, `|-`, `|+`, `|`, `||`, `!`, `!!`
+    - [x] Thematic breaks: `----` emits enter/exit thematic-break
+    - [x] Preformatted: leading space emits preformatted block
+    - [x] Event well-formedness: every enter has matching exit
+    - [x] Never-throw: any token stream produces valid events
+    - [x] Property-based fuzz tests with fast-check
+    - [x] `deno task test` passes
+    - [x] `mod.ts` re-exports `blockEvents`
+
+- [x] T05.5: Phase 3 review, bug fixes, and dedicated test files
+  - Why: Validate block parser correctness and add test coverage for all foundation modules
+  - Done when:
+    - [x] Heading parser rewritten: collect-then-trim strategy (tokenizer emits EQUALS, not HEADING_MARKER_CLOSE, for trailing `==`)
+    - [x] Fallback positions fixed in closeLevels, closeCell, closeRow (were using offset 0)
+    - [x] List type-switching fixed: `* A\n# B` now closes bullet list before opening ordered
+    - [x] Unused variables cleaned up
+    - [x] State snapshot recording deferred to Phase 7 (TODO comment added)
+    - [x] `events_test.ts` created (42 tests)
+    - [x] `token_test.ts` created (31 tests)
+    - [x] `text_source_test.ts` created (61 tests)
+    - [x] `deno task test` passes (448 total tests)
+    - [x] Test imports use deno-lint-ignore comments (no deno.json import map)
+
+- [ ] T06: Implement inline parser (Phase 4)
+  - Why: Inline markup enrichment is the next layer above block parsing
+  - Done when:
+    - [ ] `inline_parser.ts` exports inline event enrichment generator
+    - [ ] Bold/italic: apostrophe run disambiguation (2=italic, 3=bold, 5=bold+italic)
+    - [ ] Wikilinks: `[[target|display]]` with namespace dispatch
+    - [ ] External links: `[url text]` and bare URLs
+    - [ ] Templates: `{{name|args}}` with named/positional arguments
+    - [ ] Template arguments: `{{{param}}}` as Argument nodes
+    - [ ] Parser functions: `{{#if:...|...}}` classified by `#` prefix
+    - [ ] HTML tags: inline `<ref>`, `<nowiki>`, etc.
     - [ ] Event well-formedness: every enter has matching exit
-    - [ ] Never-throw: any token stream produces valid events
+    - [ ] Never-throw: any input produces valid events
     - [ ] Property-based fuzz tests with fast-check
     - [ ] `deno task test` passes
-    - [ ] `mod.ts` re-exports `blockEvents`
+    - [ ] `mod.ts` re-exports inline parser
 
 ## Parking lot
 
