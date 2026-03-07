@@ -1,92 +1,79 @@
 /**
- * Text source abstraction that lets the parser accept plain strings, ropes,
- * and CRDT buffers through one interface.
+ * A small text interface for the whole parser pipeline.
  *
- * A plain JavaScript `string` already satisfies {@linkcode TextSource}
- * (`length`, `charCodeAt`, and `slice` are built in), so the common case
- * needs no wrapper. Editors backed by ropes or CRDTs implement the same
- * three methods and feed their buffers directly into the parser, without
- * serializing to a flat string first.
+ * The parser reads source text one character at a time. In the common case,
+ * that source is just a normal JavaScript string. In an editor or live
+ * collaboration system, the source might live in a rope or CRDT buffer
+ * instead. This file gives the parser one small shape it can rely on, so the
+ * rest of the code does not care where the text came from.
  *
- * The payoff: one tokenizer, one event stream, one AST builder -- all
- * source-representation-agnostic.
+ * In practice that means all parser stages can work with the same input style:
  *
  * ```
- * ┌────────────────────────────────────────────┐
- * │               TextSource                   │
- * │  (length, charCodeAt, slice, iterSlices?)  │
- * └──────────────────┬─────────────────────────┘
- *                    │
- *         implements │
- *      ┌─────────────┼──────────────┐
- *      │             │              │
- *   plain string   Rope tree    CRDT buffer
- *      │             │              │
- *      └─────────────┴──────────────┘
- *                    │
- *                    ▼
- *            Tokenizer (hot loop)
- *            calls charCodeAt(i)
- *            on every character
+ * plain string
+ * rope-backed editor buffer
+ * CRDT-backed document
+ *        │
+ *        └── implements TextSource
+ *                │
+ *                ▼
+ *        tokenizer -> events -> tree builder
  * ```
  *
- * The tokenizer scans every character by calling `source.charCodeAt(i)`
- * in a tight inner loop. This is the single hottest call in the parser.
- * Using numeric codes (not `charAt` strings) avoids allocating a
- * one-character string per comparison, which matters at millions of
- * characters per second on large articles.
+ * A plain string already works with no wrapper because it already has the
+ * methods we need: `length`, `charCodeAt()`, and `slice()`.
  *
- * ```ts
- * // Simplified tokenizer loop -- runs once per character
- * while (i < source.length) {
- *   const code = source.charCodeAt(i);    // hot call
- *   if (code >= 128 || !DELIMITER[code]) {
- *     // absorb non-delimiter text
- *   } else {
- *     // handle delimiter
- *   }
- * }
- * ```
+ * Why these three methods?
  *
- * For a plain `string`, `charCodeAt` is a single indexed read. For a
- * rope-backed editor, the implementation might traverse tree nodes. The
- * interface hides this difference so the parser doesn't need to care.
+ * - `length` tells the scanner when to stop.
+ * - `charCodeAt()` lets the tokenizer check one character at a time in its
+ *   hottest loop without creating a new one-character string for every check.
+ * - `slice()` turns a stored range back into real text only when a later stage
+ *   or consumer actually needs the text.
  *
- * Tokens and events carry start/end offsets rather than extracted strings.
- * `slice` is called only when a consumer actually needs the text content
- * (to build a template name, render HTML, or display a node value):
+ * That last point matters. Tokens and events mostly store start and end
+ * offsets, not copied strings. So instead of creating tiny strings all the
+ * time during scanning, the parser keeps cheap numeric ranges and resolves the
+ * real text on demand.
  *
  * ```ts
  * const value = source.slice(token.start, token.end);
  * ```
  *
- * Keeping `slice` out of the hot loop avoids per-token string allocation
- * and prevents V8 sliced-string retention (where a small `.slice()` can
- * pin the entire parent string in memory).
+ * This keeps the hot path simpler and avoids extra allocation pressure while
+ * scanning large articles.
  *
- * @example Creating a TextSource from a plain string
+ * @example Using a plain string directly
  * ```ts
  * import type { TextSource } from './text_source.ts';
  *
- * // A plain string already satisfies the interface -- no wrapper needed.
  * const source: TextSource = '== Heading ==\nSome text.';
- * source.charCodeAt(0); // 61 (code for '=')
+ * source.charCodeAt(0); // 61
  * source.slice(0, 13);  // '== Heading =='
- * source.length;         // 24
+ * source.length;        // 24
  * ```
  *
- * @example Satisfying TextSource with a custom backing store
+ * @example Adapting a custom backing store
  * ```ts
  * import type { TextSource } from './text_source.ts';
  *
  * class RopeSource implements TextSource {
  *   readonly length: number;
- *   constructor(private rope: { charAt(i: number): string; toString(): string; length: number }) {
+ *
+ *   constructor(
+ *     private readonly rope: {
+ *       charAt(i: number): string;
+ *       toString(): string;
+ *       length: number;
+ *     },
+ *   ) {
  *     this.length = rope.length;
  *   }
+ *
  *   charCodeAt(index: number): number {
  *     return this.rope.charAt(index).charCodeAt(0);
  *   }
+ *
  *   slice(start: number, end: number): string {
  *     return this.rope.toString().slice(start, end);
  *   }
