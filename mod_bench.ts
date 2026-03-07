@@ -28,10 +28,12 @@ import {
 } from 'npm:mitata';
 
 import {
+  blockEvents,
   TokenType,
   enterEvent,
   errorEvent,
   exitEvent,
+  inlineEvents,
   isToken,
   textEvent,
   tokenEvent,
@@ -124,6 +126,24 @@ function drainTokenize(input: string): number {
   return count;
 }
 
+/** Drain block events so benchmarks measure parsing work, not lazy iteration setup. */
+function drainBlockEvents(input: string): number {
+  let count = 0;
+  for (const _event of blockEvents(input, tokenize(input))) {
+    count++;
+  }
+  return count;
+}
+
+/** Drain inline-enriched events over the full tokenizer -> block -> inline path. */
+function drainInlineEvents(input: string): number {
+  let count = 0;
+  for (const _event of inlineEvents(input, blockEvents(input, tokenize(input)))) {
+    count++;
+  }
+  return count;
+}
+
 summary(() => {
   bench('tokenize: plain text (9 KB)', () => {
     do_not_optimize(drainTokenize(PLAIN_TEXT));
@@ -147,6 +167,39 @@ summary(() => {
 
   bench('tokenize: mixed wikitext (7.5 KB)', () => {
     do_not_optimize(drainTokenize(MIXED_TEXT));
+  }).gc('inner');
+});
+
+// --- Event pipeline benchmarks ---
+// These measure the stages we actually added in Phases 3 and 4. Using the
+// same inputs across token-only, block, and inline runs makes it easier to see
+// where additional event-layer cost is coming from.
+
+const INLINE_HEAVY_TEXT = [
+  '== References ==',
+  "A [[Main Page|home]] link with ''italic'', '''bold''', and '''''both'''''.",
+  '<ref name="cite-1" group="note">Example &amp; entity</ref>',
+  '<span class="lead">inline tag</span> and <br/> break.',
+  '__TOC__ {{Infobox|name=value|title={{{1|Default}}}}}',
+  'A <nowiki>[[literal]] {{literal}}</nowiki> segment.',
+  '',
+].join('\n').repeat(80);
+
+summary(() => {
+  bench('blockEvents: plain text (9 KB)', () => {
+    do_not_optimize(drainBlockEvents(PLAIN_TEXT));
+  }).gc('inner');
+
+  bench('blockEvents: mixed wikitext (7.5 KB)', () => {
+    do_not_optimize(drainBlockEvents(MIXED_TEXT));
+  }).gc('inner');
+
+  bench('inlineEvents: mixed wikitext (7.5 KB)', () => {
+    do_not_optimize(drainInlineEvents(MIXED_TEXT));
+  }).gc('inner');
+
+  bench('inlineEvents: inline-heavy wikitext (16 KB)', () => {
+    do_not_optimize(drainInlineEvents(INLINE_HEAVY_TEXT));
   }).gc('inner');
 });
 
