@@ -232,6 +232,11 @@ export function* blockEvents(
   while (peek(buf) !== null) {
     const tok = peek(buf)!;
 
+    // TODO: snapshot recording point for incremental reparsing.
+    // A BlockSnapshot captured here (before dispatch) would record the
+    // token buffer position, line tracker state, and open block stack,
+    // letting the incremental parser restart from any block boundary.
+
     // Skip newlines between blocks (blank lines).
     if (tok.type === TokenType.NEWLINE) {
       advance(buf);
@@ -286,10 +291,15 @@ export function* blockEvents(
 // Wikitext headings: `== Title ==`
 // The opening `=` count sets the level (1-6). A closing `=` run on the
 // same line is optional. Content between them is inline text.
+//
+// Strategy: collect all tokens on the line, then trim a trailing close
+// marker (HEADING_MARKER_CLOSE or EQUALS) and surrounding whitespace
+// from the end. This avoids premature close detection for mid-content
+// equals signs like `== a=b ==`.
 
 function* parseHeading(
   buf: TokenBuffer,
-  source: TextSource,
+  _source: TextSource,
 ): Generator<WikitextEvent> {
   const marker = consume(buf)!;
   const level = Math.min(6, Math.max(1, marker.end - marker.start)) as
@@ -297,49 +307,54 @@ function* parseHeading(
 
   const startPt = pointAt(buf.tracker, marker.start);
 
-  // Collect inline content tokens until NEWLINE, HEADING_MARKER_CLOSE, or EOF.
-  // Track the last content token to find the heading's end position.
-  const contentTokens: Token[] = [];
-  let endOffset = marker.end;
+  // Collect all tokens on this line (until NEWLINE or EOF).
+  const lineTokens: Token[] = [];
 
   while (peek(buf) !== null) {
     const t = peek(buf)!;
     if (t.type === TokenType.NEWLINE || t.type === TokenType.EOF) break;
-
-    // Skip leading whitespace after the heading marker.
-    if (contentTokens.length === 0 && t.type === TokenType.WHITESPACE) {
-      advance(buf);
-      continue;
-    }
-
-    if (t.type === TokenType.HEADING_MARKER_CLOSE) {
-      endOffset = t.end;
-      advance(buf);
-      // Skip trailing whitespace after closing marker.
-      while (peek(buf) !== null) {
-        const tw = peek(buf)!;
-        if (tw.type === TokenType.NEWLINE || tw.type === TokenType.EOF) break;
-        if (tw.type === TokenType.WHITESPACE) {
-          advance(buf);
-          continue;
-        }
-        // Unexpected tokens after close marker: absorb as trailing content.
-        break;
-      }
-      break;
-    }
-
-    contentTokens.push(t);
-    endOffset = t.end;
+    lineTokens.push(t);
     advance(buf);
   }
 
-  // Trim trailing whitespace tokens from content (before the close marker).
+  // Trim trailing whitespace.
   while (
-    contentTokens.length > 0 &&
-    contentTokens[contentTokens.length - 1].type === TokenType.WHITESPACE
+    lineTokens.length > 0 &&
+    lineTokens[lineTokens.length - 1].type === TokenType.WHITESPACE
   ) {
-    contentTokens.pop();
+    lineTokens.pop();
+  }
+
+  // Trim trailing close marker (HEADING_MARKER_CLOSE or EQUALS).
+  let endOffset = marker.end;
+  if (
+    lineTokens.length > 0 &&
+    (lineTokens[lineTokens.length - 1].type === TokenType.HEADING_MARKER_CLOSE ||
+      lineTokens[lineTokens.length - 1].type === TokenType.EQUALS)
+  ) {
+    const closeTok = lineTokens.pop()!;
+    endOffset = closeTok.end;
+  }
+
+  // Trim whitespace between content and the (now-removed) close marker.
+  while (
+    lineTokens.length > 0 &&
+    lineTokens[lineTokens.length - 1].type === TokenType.WHITESPACE
+  ) {
+    lineTokens.pop();
+  }
+
+  // Trim leading whitespace after the heading marker.
+  while (
+    lineTokens.length > 0 &&
+    lineTokens[0].type === TokenType.WHITESPACE
+  ) {
+    lineTokens.shift();
+  }
+
+  // Use endOffset from the last remaining token if we have content.
+  if (lineTokens.length > 0) {
+    endOffset = Math.max(endOffset, lineTokens[lineTokens.length - 1].end);
   }
 
   const endPt = pointAt(buf.tracker, endOffset);
@@ -348,7 +363,7 @@ function* parseHeading(
   yield enterEvent('heading', { level }, headingPos);
 
   // Emit text events for the content tokens.
-  for (const ct of contentTokens) {
+  for (const ct of lineTokens) {
     const ctStart = pointAt(buf.tracker, ct.start);
     const ctEnd = pointAt(buf.tracker, ct.end);
     yield textEvent(ct.start, ct.end, pos(ctStart, ctEnd));
@@ -386,7 +401,7 @@ function* parseParagraph(
   const startPt = pointAt(buf.tracker, firstTok.start);
 
   const contentTokens: Token[] = [];
-  let endOffset = firstTok.start;
+  let _endOffset = firstTok.start;
   let sawNewline = false;
 
   while (peek(buf) !== null) {
@@ -402,7 +417,7 @@ function* parseParagraph(
         break;
       }
       sawNewline = true;
-      endOffset = t.end;
+      _endOffset = t.end;
       advance(buf);
 
       // Check what follows the newline.
@@ -420,7 +435,7 @@ function* parseParagraph(
 
     sawNewline = false;
     contentTokens.push(t);
-    endOffset = t.end;
+    _endOffset = t.end;
     advance(buf);
   }
 
@@ -468,13 +483,11 @@ function* parseParagraph(
 
 function* parseList(
   buf: TokenBuffer,
-  source: TextSource,
+  _source: TextSource,
 ): Generator<WikitextEvent> {
   // The open stack tracks which lists and items are currently open.
   // Each entry is { level: ListLevel, had_item: boolean }.
   const openStack: { level: ListLevel; marker_char: string }[] = [];
-  let firstStart: Point | null = null;
-  let lastEnd: Point | null = null;
 
   // Process consecutive list lines.
   while (peek(buf) !== null) {
@@ -510,16 +523,20 @@ function* parseList(
       advance(buf);
     }
 
-    const lineStartPt = pointAt(buf.tracker, markers.length > 0
-      ? markersEndOffset - markers.length
-      : markersEndOffset);
-
-    if (firstStart === null) firstStart = lineStartPt;
-
     const depth = markers.length;
 
     // Close levels deeper than the current line's depth.
     yield* closeLevels(buf, openStack, depth);
+
+    // If marker type changed at an existing depth, close back to that point
+    // and reopen with the new type. Example: `* A\n# B` at depth 1 switches
+    // from bullet to ordered.
+    if (openStack.length > 0 && openStack.length <= depth) {
+      const topIdx = openStack.length - 1;
+      if (openStack[topIdx].marker_char !== markers[topIdx]) {
+        yield* closeLevels(buf, openStack, topIdx);
+      }
+    }
 
     // Open new levels or adjust existing levels.
     for (let i = openStack.length; i < depth; i++) {
@@ -579,7 +596,6 @@ function* parseList(
     }
 
     const itemEndPt = pointAt(buf.tracker, lineEndOffset);
-    lastEnd = itemEndPt;
 
     // Close the list item.
     if (lastLevel.kind === 'definition-term') {
@@ -608,9 +624,11 @@ function* closeLevels(
 ): Generator<WikitextEvent> {
   while (stack.length > targetDepth) {
     const entry = stack.pop()!;
+    // When no more tokens remain, use the tracker's current position
+    // (line_offset tracks the last known newline boundary).
     const closePt = peek(buf)
       ? pointAt(buf.tracker, peek(buf)!.start)
-      : pointAt(buf.tracker, 0);
+      : point(buf.tracker.line, 1, buf.tracker.line_offset);
     const closePos = zeroPos(closePt);
 
     // Close the wrapping list.
@@ -900,14 +918,14 @@ function* parseTableCells(
 function* closeCell(buf: TokenBuffer): Generator<WikitextEvent> {
   const pt = peek(buf)
     ? pointAt(buf.tracker, peek(buf)!.start)
-    : pointAt(buf.tracker, 0);
+    : point(buf.tracker.line, 1, buf.tracker.line_offset);
   yield exitEvent('table-cell', zeroPos(pt));
 }
 
 function* closeRow(buf: TokenBuffer): Generator<WikitextEvent> {
   const pt = peek(buf)
     ? pointAt(buf.tracker, peek(buf)!.start)
-    : pointAt(buf.tracker, 0);
+    : point(buf.tracker.line, 1, buf.tracker.line_offset);
   yield exitEvent('table-row', zeroPos(pt));
 }
 
