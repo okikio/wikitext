@@ -1,5 +1,20 @@
 # Repository-wide Copilot Instructions
 
+## What this file is for
+
+This file is the repo-wide base instruction layer.
+
+Use it for:
+- repository context
+- architecture understanding
+- global reasoning and writing expectations
+- safety and correctness defaults
+
+More specific instructions live under `.github/instructions/` and apply by file pattern or task type.
+When a more specific instruction file applies, follow that file for the scoped task and use this file as the fallback base.
+
+Do not duplicate specialized commit, changelog, or file-pattern-specific rules here unless they are truly repo-wide.
+
 ## What this project is
 
 This repository builds a standards-aligned wikitext parser and related tooling.
@@ -22,23 +37,13 @@ TextSource ─► Tokenizer ─► Event Stream ─► [Consumer]
 
 The pipeline accepts any `TextSource`. Plain `string` satisfies the interface.
 
-Events are range-first. Text events carry offset ranges into the source instead
-of eagerly extracted strings.
+Events are range-first. Text events carry offset ranges into the source instead of eagerly extracted strings.
 
 Core streaming modes:
 
 * `outlineEvents(input)`: block-only, no inline parsing
 * `events(input)`: full enter/exit/text event stream
 * `parseChunked(chunks)`: progressive completed block nodes
-
-## Writing and explanation style
-
-* Use familiar language that a reasonably experienced JavaScript or TypeScript developer would understand without pausing.
-* Do not swap one hard word for another and call that plain English.
-* If you need a technical term, explain the concrete behavior first, then introduce the term if it still helps.
-* Ground abstract explanations in something the reader can picture here: a code path, a marker sequence, a bug, a performance cost, or a downstream benefit.
-* When using a technical term such as `lexical`, `invariant`, or `delimiter`, explain what that means in this codebase, not just in theory.
-* Diagrams must match real behavior in the implementation or spec. Do not simplify them into something that teaches the wrong thing.
 
 ## Non-negotiable parser contracts
 
@@ -47,21 +52,39 @@ Core streaming modes:
 * Never throw: the parser produces a valid result for any input.
 * Determinism: same input and same config produce the same output.
 
+## Writing and explanation style
+
+* Use familiar language that a JavaScript or TypeScript developer with about 2 to 3 years of experience would likely understand on first read.
+* Do not assume parser, compiler, or formal language theory background unless the task clearly requires it.
+* Do not replace one abstract phrase with another abstract phrase and call it clarity.
+* Do not swap one hard word for another and call that plain English.
+* When explaining a hard idea, start with concrete technical behavior from this repo or task.
+* Ground explanations in at least one concrete anchor such as:
+
+  * a real code path
+  * a concrete input or output
+  * a token or marker sequence
+  * a bug or failure mode
+  * a performance or allocation cost
+  * a downstream effect for callers, maintainers, or consumers
+* Explain what happens first, then why it matters here, then introduce the technical name only if it still helps.
+* If a technical term such as `lexical`, `invariant`, or `delimiter` is necessary, explain what it means in this codebase and why it matters here.
+* Use a real-world metaphor only when direct technical grounding still is not enough.
+* Keep metaphors brief and accurate.
+* After using a metaphor, return to the real technical behavior before moving on.
+* Diagrams must match real behavior in the implementation or spec. Do not simplify them into something that teaches the wrong thing.
+* Avoid em dashes in prose.
+
 ## Default operating mode
 
 * Be explicit and high-signal.
 * Prefer the smallest correct change first.
-* Do not invent files, APIs, config, or behavior that are not visible in the repo.
+* Do not invent files, APIs, config, behavior, or guarantees that are not visible in the repo.
 * If something is unclear, state the assumption and give a concrete verification step.
 * Prefer established standards and conventions when they fit the problem.
 * Call out trade-offs when multiple valid approaches exist.
 * Optimize for maintainability, clarity, reproducibility, and educational value.
-* Use plain English in docs, comments, TSDoc, PR prose, and explanations.
-* When technical or abstract terms are necessary, define them in grounded language that starts from something concrete the unfamiliar reader can picture.
-* Do not replace one abstract phrase with another abstract phrase and call it clarity.
-* Tie abstractions to real behavior, cost, failure mode, or downstream benefit.
 * Verify diagrams, examples, and explanatory claims against the implementation before presenting them as fact.
-* Avoid em dashes in prose.
 
 ## Safety and correctness
 
@@ -78,10 +101,14 @@ deno task bench
 deno doc --lint mod.ts
 ```
 
-Run `deno doc --lint mod.ts` after any change to the public API surface or its
-documentation.
+Run `deno doc --lint mod.ts` after any change to the public API surface or its documentation.
 
-## Where focused rules live
+## Instruction routing
 
-More specific instructions live under `.github/instructions/` and apply by file
-pattern. Follow those files when working in matching paths.
+More specific instructions live under `.github/instructions/` and apply by file pattern or task type. Follow those files when they apply.
+
+Examples:
+
+* docs-writing instructions for docs, comments, and TSDoc work
+* commit-writing instructions for commit messages
+* changelog-writing instructions for changelog entries and release notes
