@@ -16,6 +16,7 @@
  * - `WikistNode` types, type guards, and builders for the tree model
  * - `tokenize()` for raw scanning
  * - `blockEvents()` for block-level structure
+ * - `inlineEvents()` for inline event enrichment
  *
  * As more features land, this entry point is where they will be re-exported.
  *
@@ -36,3 +37,4 @@ export * from './events.ts';
 export * from './ast.ts';
 export * from './tokenizer.ts';
 export * from './block_parser.ts';
+export * from './inline_parser.ts';
