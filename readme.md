@@ -65,20 +65,33 @@ for (const evt of outlineEvents(largeArticle)) {
 
 > **Note:** `parse()`, `stringify()`, `events()`, and `outlineEvents()` are not
 > yet implemented. The foundational type system (TextSource, Token, events, AST
-> nodes) and the tokenizer are complete and published. The parsers, tree builder,
-> stringifier, and filter utilities are under active development.
+> nodes), the tokenizer, and the block-level parser are complete and published.
+> The inline parser, tree builder, stringifier, and filter utilities are under
+> active development.
 
-You can already use the type system, builder functions, and tokenizer:
+You can already use the type system, builder functions, tokenizer, and block
+parser:
 
 ```ts
 import type { TextSource, WikitextEvent, WikistNode } from '@okikio/wikitext';
-import { TokenType, isToken, tokenize, root, heading, text } from '@okikio/wikitext';
+import { TokenType, isToken, tokenize, blockEvents, root, heading, text } from '@okikio/wikitext';
 
 // Tokenize wikitext into a stream of offset-based tokens
 for (const tok of tokenize('== Heading ==\nSome text.')) {
   console.log(tok.type, tok.start, tok.end);
   // HEADING_MARKER 0 2
   // WHITESPACE 2 3
+  // ...
+}
+
+// Stream block-level events from tokenized input
+const source = '== Heading ==\n\nA paragraph.';
+for (const evt of blockEvents(source, tokenize(source))) {
+  console.log(evt.kind, evt.node_type ?? '');
+  // enter heading
+  // text ...
+  // exit heading
+  // enter paragraph
   // ...
 }
 
@@ -128,7 +141,7 @@ event consumers.
 | `events.ts` | Event stream types, constructors, and type guards | Published |
 | `ast.ts` | Wikist AST node types, type guards, and builders | Published |
 | `tokenizer.ts` | `charCodeAt` generator scanner over `TextSource` | Published |
-| `block_parser.ts` | Block-level event emitter | Not yet implemented |
+| `block_parser.ts` | Block-level event emitter | Published |
 | `inline_parser.ts` | Inline event enrichment | Not yet implemented |
 | `parse.ts` | Orchestration (tokenizer, block, inline, tree) | Not yet implemented |
 | `tree_builder.ts` | `buildTree(events)` to `WikistRoot` | Not yet implemented |
@@ -153,6 +166,7 @@ event consumers.
 | Function | Description |
 |----------|-------------|
 | `tokenize(input)` | Raw token generator stream. **Available now.** |
+| `blockEvents(source, tokens)` | Block-level event stream from tokens. **Available now.** |
 | `buildTree(events)` | Build AST from an event iterable. _Not yet implemented._ |
 
 ### Tree utilities
@@ -172,6 +186,7 @@ event consumers.
 | `Token` | `token.ts` | Token interface (type + start/end offsets) |
 | `isToken()` | `token.ts` | Type guard for Token validation |
 | `tokenize()` | `tokenizer.ts` | Generator-based charCodeAt scanner |
+| `blockEvents()` | `block_parser.ts` | Block-level event generator from tokens |
 | `WikitextEvent` | `events.ts` | Discriminated union of 5 event kinds |
 | `enterEvent()`, `exitEvent()`, ... | `events.ts` | Event constructors |
 | `isEnterEvent()`, `isExitEvent()`, ... | `events.ts` | Event type guards |

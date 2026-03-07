@@ -329,10 +329,12 @@ line-oriented: the first token(s) of each line determine the block type.
 (other)    → Paragraph
 ```
 
-At each block boundary, the parser records a compact **state snapshot**:
+At each block boundary, the parser will record a compact **state snapshot**:
 `{ inNowiki, inPre, openTagStack, openTemplateDepth, inTable }`. These
-snapshots enable incremental reparsing by identifying the nearest
-"neutral boundary" (all stacks empty) when an edit occurs.
+snapshots will enable incremental reparsing by identifying the nearest
+"neutral boundary" (all stacks empty) when an edit occurs. State snapshot
+recording is deferred to later; the insertion point is marked with a
+`TODO` comment in `block_parser.ts`.
 
 **Neutral boundary definition**: a neutral boundary is a position where ALL
 of the following tracked parser state is at its default (empty/zero) value:
