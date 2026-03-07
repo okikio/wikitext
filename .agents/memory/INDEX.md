@@ -2,7 +2,7 @@
 
 ## Core references
 
-- [PROJECT](PROJECT.md)
+- [PROJECT](PROJECT.md): current parser scope, stable architecture, longer-term platform direction
 - [CONVENTIONS](CONVENTIONS.md)
 - [GLOSSARY](GLOSSARY.md)
 

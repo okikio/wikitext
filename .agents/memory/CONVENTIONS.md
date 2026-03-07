@@ -21,6 +21,10 @@ survives context resets.
 - Update `ACTIVE/PROGRESS.md` after meaningful progress.
 - Mark tasks done only when acceptance checks pass.
 - Promote architectural decisions to ADRs in `DECISIONS/`.
+- Keep the active scope on the wikitext parser even when broader future
+  platform ideas are discussed.
+- Treat unified ecosystem support as an optional adapter boundary, not the
+  core runtime model.
 - Run `deno task test`, `deno task bench`, and `deno doc --lint mod.ts` before
   marking any API-touching task complete.
 - The parser never throws: enforce the never-throw invariant in every change.

@@ -43,6 +43,19 @@
   `variants: WikistNode[][]`). Represents structurally divergent
   interpretations of the same source range (jj-inspired). Not produced by
   the core parser; intended for collab/merge tooling.
+- **Profile**: A named syntax and behavior configuration layered on the core
+  parser primitives. A profile can tune classification, parsing rules,
+  recovery behavior, and later editing or rendering semantics for a markup
+  family.
+- **Native runtime**: The project's own execution model built around tokens,
+  events, trees, sessions, streaming, and profile-driven behavior. This is
+  distinct from unified and remains the intended long-term center of gravity.
+- **Unified adapter**: Optional compatibility layer that exposes wikist or
+  related trees through unified parser/compiler or bridge plugins so existing
+  ecosystem plugins can be reused without making unified the core runtime.
+- **Workflow step**: A reminder that the parser is one stage in a larger
+  document pipeline. It should stay focused on producing correct primitives
+  that later consumers, editors, sync layers, and transforms build on.
 
 ## Wikitext constructs
 

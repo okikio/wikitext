@@ -31,6 +31,22 @@ but no streaming or unist compatibility.
 - HTML rendering (direct compilation is a convenience, not a goal)
 - MediaWiki behavioral quirk-matching (deferred to "mediawiki" profile)
 
+## Scope discipline
+
+- Use wikitext as the proving ground for parser primitives before expanding
+  into a broader profile-driven document engine.
+- Treat the parser as one simple workflow step in the larger future system:
+  its job is to produce correct primitives that downstream transforms,
+  renderers, editors, and session-based tools can consume.
+- The longer-term direction includes other markup and rich-text profiles,
+  structured CMS blocks, local-first collaboration, offline or local sync,
+  and LLM-oriented workflows.
+- Unified ecosystem support remains desirable during that transition, but as
+  optional adapters over unist-compatible exports rather than as the core
+  runtime architecture.
+- Do not let that broader direction dilute current work on the wikitext parser
+  itself.
+
 ## Approach
 
 See `docs/architecture.md` for the full pipeline design. In summary:

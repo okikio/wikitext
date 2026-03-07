@@ -16,6 +16,11 @@ live under `SESSIONS` and are gitignored.
 Use `ACTIVE` as the control panel for ongoing work, `DECISIONS` for long-lived
 architectural choices, and `CHECKLISTS` for repeatable quality gates.
 
+Keep current parser milestones and the larger platform vision separate. The
+parser remains the active proving ground; broader future direction belongs in
+`PROJECT`, `DECISIONS`, and tightly scoped notes in `ACTIVE`, not in inflated
+task lists.
+
 ## Edge cases
 
 If `TASKS` grows too large, split into multiple files or an epic folder. If a

@@ -14,6 +14,22 @@ interchange format.
 - Flat file layout at root; `mod.ts` re-exports all public APIs
 - Source parser only: no template expansion or HTML rendering
 
+## Longer-term direction
+
+- Near-term focus stays on finishing the wikitext parser and validating the
+    tokenizer, event stream, tree, and future session primitives there first.
+- The parser is intentionally only one workflow step in the larger system:
+    source text enters the parser, and downstream consumers operate on tokens,
+    events, trees, and later session state.
+- Longer-term, those primitives may expand into a profile-driven structured
+    document engine for other markup and rich-text families, CMS-style blocks,
+    local-first collaboration, offline or local sync, and LLM-friendly flows.
+- Until a native runtime ecosystem exists for those broader goals, the project
+    should still be able to take advantage of unified ecosystem plugins through
+    optional adapters built on unist-compatible exports.
+- Treat that as future platform direction, not a reason to broaden current
+    parser scope prematurely.
+
 ## Key modules
 
 Implemented:
@@ -24,9 +40,11 @@ Implemented:
 - `tokenizer.ts`: charCodeAt generator-based scanner over TextSource
 - `block_parser.ts`: block-level event generator (headings, paragraphs, lists,
   definition lists, tables, thematic breaks, preformatted blocks)
+- `inline_parser.ts`: inline event enrichment (emphasis, links, templates,
+  arguments, comments, behavior switches, signatures, HTML entities,
+  `<br>`, `<nowiki>`, `<ref>`, and generic HTML tags)
 
 Not yet implemented:
-- `inline_parser.ts`: inline event enrichment
 - `parse.ts`: orchestration (tokenizer -> block -> inline -> tree)
 - `tree_builder.ts`: `buildTree(events) -> WikistRoot`
 - `stringify.ts`: AST -> wikitext (round-trip)
@@ -40,6 +58,7 @@ Available now:
 - `TokenType`, `Token`, `isToken()` (token.ts)
 - `tokenize()` (tokenizer.ts)
 - `blockEvents()` (block_parser.ts)
+- `inlineEvents()` (inline_parser.ts)
 - `WikitextEvent`, `EnterEvent`, `ExitEvent`, ... + constructors + guards (events.ts)
 - `WikistNode`, `WikistRoot`, 37 node types + type guards + builders (ast.ts)
 

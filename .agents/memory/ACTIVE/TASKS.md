@@ -90,22 +90,22 @@ Rules:
     - [x] `deno task test` passes (448 total tests)
     - [x] Test imports use deno-lint-ignore comments (no deno.json import map)
 
-- [ ] T06: Implement inline parser (Phase 4)
+- [x] T06: Implement inline parser (Phase 4)
   - Why: Inline markup enrichment is the next layer above block parsing
   - Done when:
-    - [ ] `inline_parser.ts` exports inline event enrichment generator
-    - [ ] Bold/italic: apostrophe run disambiguation (2=italic, 3=bold, 5=bold+italic)
-    - [ ] Wikilinks: `[[target|display]]` with namespace dispatch
-    - [ ] External links: `[url text]` and bare URLs
-    - [ ] Templates: `{{name|args}}` with named/positional arguments
-    - [ ] Template arguments: `{{{param}}}` as Argument nodes
-    - [ ] Parser functions: `{{#if:...|...}}` classified by `#` prefix
-    - [ ] HTML tags: inline `<ref>`, `<nowiki>`, etc.
-    - [ ] Event well-formedness: every enter has matching exit
-    - [ ] Never-throw: any input produces valid events
-    - [ ] Property-based fuzz tests with fast-check
-    - [ ] `deno task test` passes
-    - [ ] `mod.ts` re-exports inline parser
+    - [x] `inline_parser.ts` exports inline event enrichment generator
+    - [x] Bold/italic: apostrophe run disambiguation (2=italic, 3=bold, 5=bold+italic)
+    - [x] Wikilinks: `[[target|display]]` with namespace dispatch
+    - [x] External links: `[url text]` and bare URLs
+    - [x] Templates: `{{name|args}}` with named/positional arguments
+    - [x] Template arguments: `{{{param}}}` as Argument nodes
+    - [x] Parser functions: `{{#if:...|...}}` classified by `#` prefix
+    - [x] HTML tags: inline `<ref>`, `<nowiki>`, etc.
+    - [x] Event well-formedness: every enter has matching exit
+    - [x] Never-throw: any input produces valid events
+    - [x] Property-based fuzz tests with fast-check
+    - [x] `deno task test` passes
+    - [x] `mod.ts` re-exports inline parser
 
 ## Parking lot
 

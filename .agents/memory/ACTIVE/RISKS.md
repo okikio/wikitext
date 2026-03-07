@@ -41,6 +41,10 @@
   `{{SomeTemplate}}` (template). Default: parse all non-`#`-prefixed as
   Template. Risk: profiles may need a word list, adding configuration
   burden.
+- **Ecosystem adapter pressure**: Reusing unified ecosystem plugins is useful,
+  but letting unified-style assumptions leak into the hot path could distort
+  the event-stream-first runtime and incremental design. Mitigation: keep
+  unified support at the adapter boundary over unist-compatible exports.
 - **Heading close marker token mismatch (discovered, resolved)**: The
   tokenizer emits `EQUALS` (not `HEADING_MARKER_CLOSE`) for trailing `==`
   in headings. The block parser originally checked for `HEADING_MARKER_CLOSE`

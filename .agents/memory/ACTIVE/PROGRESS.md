@@ -12,9 +12,15 @@
 - Test imports use deno-lint-ignore comments with inline jsr:/npm: specifiers (no deno.json import map)
 - Benchmarks GC-annotated for allocation-heavy tokenizer paths
 - State snapshot recording deferred to Phase 7 (TODO comment in block_parser.ts)
-- Current task: T06 (Inline parser implementation, Phase 4) — not started
+- Current task: Phase 4 complete; Phase 5 orchestration not started
+- Longer-term direction: broader profile-driven document engine is recorded,
+  but current focus remains validating parser primitives through the wikitext
+  parser first
+- Ecosystem direction: unified compatibility stays desirable, but through
+  optional adapters at the edge while the native runtime model remains the
+  long-term target
 - Blockers: none
-- Total tests: 448 across 8 test files, 0 failures, 0 compile errors
+- Total tests: 479, 0 failures, 0 compile errors
 
 ## Completed
 
@@ -116,6 +122,23 @@
     custom TextSource impl, property-based round-trips
   - `deno task test` passes (448 total tests)
 
+- [x] T06: Implement inline parser (Phase 4)
+  - `inline_parser.ts`: offset-driven inline enrichment generator
+  - Covers apostrophe emphasis, wikilinks, image/category namespace dispatch,
+    bracketed and bare external links, templates, parser functions,
+    triple-brace arguments, comments, behavior switches, signatures,
+    HTML entities, `<br>`, `<nowiki>`, `<ref>`, and generic HTML tags
+  - Adjacent block-parser text spans are merged before enrichment so inline
+    constructs can span token-sized text events
+  - Position recovery uses line-start tables instead of per-character `Point`
+    allocation in the hot path
+  - `inline_parser_test.ts`: focused examples, behavior-switch edge cases, and
+    property-based invariants
+  - `mod.ts`: re-exports `inlineEvents()`
+  - `mod_bench.ts`: now benchmarks token-only, block-events, and full inline
+    enrichment paths on representative inputs
+  - `deno task test` passes (479 total tests)
+
 ## Notes for the next agent
 
 - Conventions:
@@ -149,7 +172,6 @@
   - State snapshot recording is deferred to Phase 7 (TODO comment in place)
   - blockEvents() accepts (source: TextSource, tokens: Iterable<Token>)
 - What's NOT implemented yet:
-  - inline_parser.ts
   - parse.ts, tree_builder.ts, stringify.ts, filter.ts
   - session.ts
 - Verification commands:
