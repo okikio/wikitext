@@ -14,6 +14,12 @@ import { describe, it } from 'jsr:@std/testing/bdd';
 import { expect } from 'jsr:@std/expect';
 import * as fc from 'npm:fast-check';
 
+import {
+  odd_character_wikitext_string,
+  pathological_wikitext_string,
+  spacing_heavy_wikitext_string,
+  wikiish_string,
+} from './_test_utils/arbitraries.ts';
 import { tokenize } from './tokenizer.ts';
 import { TokenType } from './token.ts';
 import type { Token } from './token.ts';
@@ -109,6 +115,32 @@ describe('whitespace', () => {
     expect(typeAt(t, 1)).toBe(TokenType.WHITESPACE);
     expect(t[1]).toEqual({ type: TokenType.WHITESPACE, start: 1, end: 4 });
   });
+
+  it('leading space changes heading syntax into a preformatted line start', () => {
+    const input = ' == Title ==';
+    const t = tokens(input);
+
+    // One literal space at column 0 is enough to change the block meaning of
+    // the line. This test is necessary because heading markers and leading
+    // spaces compete at the same boundary, and recovery only makes sense if the
+    // tokenizer makes that choice consistently.
+
+    expect(typeAt(t, 0)).toBe(TokenType.PREFORMATTED_MARKER);
+    expect(t.some((tok) => tok.type === TokenType.HEADING_MARKER)).toBe(false);
+  });
+
+  it('leading tab removes heading-marker classification without creating preformatting', () => {
+    const input = '\t== Title ==';
+    const t = tokens(input);
+
+    // Tabs are ordinary whitespace in this scanner. That means a tab at the
+    // start of the line should stop heading recognition, but it should not be
+    // silently upgraded into the special single-space preformatted marker.
+
+    expect(typeAt(t, 0)).toBe(TokenType.WHITESPACE);
+    expect(t.some((tok) => tok.type === TokenType.HEADING_MARKER)).toBe(false);
+    expect(t.some((tok) => tok.type === TokenType.PREFORMATTED_MARKER)).toBe(false);
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -184,6 +216,17 @@ describe('lists', () => {
     const t = tokens('text\n* item');
     const bullets = t.filter((tok) => tok.type === TokenType.BULLET);
     expect(bullets).toHaveLength(1);
+  });
+
+  it('keeps line-start significance after a list marker so following spaces stay structural', () => {
+    const t = tokens('* item');
+
+    // The tokenizer intentionally keeps line-start semantics alive across stacked
+    // list markers. That makes the space after `*` distinct from mid-line
+    // whitespace, which is important for later block decisions.
+
+    expect(typeAt(t, 0)).toBe(TokenType.BULLET);
+    expect(typeAt(t, 1)).toBe(TokenType.PREFORMATTED_MARKER);
   });
 });
 
@@ -774,6 +817,98 @@ describe('edge cases', () => {
     );
     expect(ampToken).toBeDefined();
   });
+
+  it('bare URLs are not tokenized as link syntax by the tokenizer', () => {
+    const t = tokens('Visit https://example.com now');
+
+    // Bare URLs are an inline-parser concern, not a tokenizer concern. The
+    // tokenizer should stay structural and avoid inventing bracket syntax that
+    // is not present in the source.
+
+    expect(t.some((tok) => tok.type === TokenType.EXT_LINK_OPEN)).toBe(false);
+    expect(t.some((tok) => tok.type === TokenType.LINK_OPEN)).toBe(false);
+    expect(t.some((tok) => tok.type === TokenType.LINK_CLOSE)).toBe(false);
+  });
+
+  it('mid-line block markers stay as plain text', () => {
+    const input = 'math 3*5 #1 key:value';
+    const t = tokens(input);
+
+    // `*`, `#`, and `:` only become block markers at line start. Mid-line they
+    // are ordinary text, and this boundary keeps the scanner from becoming too
+    // eager.
+
+    expect(t.some((tok) => tok.type === TokenType.BULLET)).toBe(false);
+    expect(t.some((tok) => tok.type === TokenType.HASH)).toBe(false);
+    expect(t.some((tok) => tok.type === TokenType.COLON)).toBe(false);
+  });
+
+  it('apostrophes inside ordinary words do not become APOSTROPHE_RUN', () => {
+    const t = tokens("can't rock'n'roll won't");
+    const runs = t.filter((tok) => tok.type === TokenType.APOSTROPHE_RUN);
+
+    // Apostrophes are only special in repeated delimiter runs. Inside normal
+    // words they should remain text, otherwise contractions would become
+    // formatting syntax accidentally.
+
+    expect(runs).toHaveLength(0);
+  });
+
+  it('markdown fenced code markers are plain text to the tokenizer', () => {
+    const input = '```ts\nconst x = [[not-a-special-mode]];\n```';
+    const t = tokens(input);
+    const backtickText = t.find((tok) =>
+      tok.type === TokenType.TEXT && input.slice(tok.start, tok.end).startsWith('```')
+    );
+
+    // Markdown fences are unsupported syntax in this repo today. The safe and
+    // reasonable behavior is to preserve them as text rather than switching the
+    // tokenizer into a separate mode.
+    expect(backtickText).toBeDefined();
+  });
+
+  it('treats backslashes as literal text instead of escaping inline delimiters', () => {
+    const input = '\\[[Page]] \\{{Card}} \\&amp;';
+    const t = tokens(input);
+
+    // The current scanner does not implement backslash escaping. That means the
+    // backslash itself stays in TEXT, and the delimiter that follows is still
+    // tokenized normally. This test is necessary because many markup systems do
+    // treat backslash as an escape, and we want the suite to pin down that this
+    // parser does not do that yet.
+
+    expect(typeAt(t, 0)).toBe(TokenType.TEXT);
+    expect(t.some((tok) => tok.type === TokenType.LINK_OPEN)).toBe(true);
+    expect(t.some((tok) => tok.type === TokenType.TEMPLATE_OPEN)).toBe(true);
+    expect(t.some((tok) => tok.type === TokenType.HTML_ENTITY)).toBe(true);
+  });
+
+  it('lets a literal backslash block line-start marker recognition by changing position', () => {
+    const input = '\\* item';
+    const t = tokens(input);
+
+    // Backslash is not an escape signal here, but it is still a real character at
+    // column 0. That moves the `*` away from the line-start boundary, so the star
+    // should no longer be classified as a list marker.
+
+    expect(t.some((tok) => tok.type === TokenType.BULLET)).toBe(false);
+  });
+
+  it('keeps odd unicode payload text inside otherwise valid heading syntax', () => {
+    const input = '== Caf\u0301e\u2060Title ==';
+    const t = tokens(input);
+    const oddText = t.find((tok) =>
+      tok.type === TokenType.TEXT && input.slice(tok.start, tok.end).includes('\u2060')
+    );
+
+    // This is a valid heading with unusual payload text, not malformed syntax.
+    // The scanner should still recognize the heading markers and leave the odd
+    // code points inside ordinary text spans instead of fragmenting the token
+    // stream around them.
+
+    expect(typeAt(t, 0)).toBe(TokenType.HEADING_MARKER);
+    expect(oddText).toBeDefined();
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -1015,37 +1150,8 @@ describe('property-based invariants', () => {
   });
 
   it('never throws on wikitext-like input', () => {
-    // Generate strings biased toward wikitext characters
-    const wikiChar = fc.oneof(
-      fc.constant('='),
-      fc.constant("'"),
-      fc.constant('['),
-      fc.constant(']'),
-      fc.constant('{'),
-      fc.constant('}'),
-      fc.constant('|'),
-      fc.constant('!'),
-      fc.constant('*'),
-      fc.constant('#'),
-      fc.constant(':'),
-      fc.constant(';'),
-      fc.constant('-'),
-      fc.constant('~'),
-      fc.constant('_'),
-      fc.constant('<'),
-      fc.constant('>'),
-      fc.constant('&'),
-      fc.constant('/'),
-      fc.constant('\n'),
-      fc.constant('\r'),
-      fc.constant(' '),
-      fc.integer({ min: 0x20, max: 0x7e }).map((c) => String.fromCharCode(c)),
-    );
-    const wikiString = fc.array(wikiChar, { minLength: 0, maxLength: 200 })
-      .map((chars) => chars.join(''));
-
     fc.assert(
-      fc.property(wikiString, (s) => {
+      fc.property(wikiish_string(), (s) => {
         const t = tokens(s);
         expect(t[t.length - 1].type).toBe(TokenType.EOF);
         // Token tiling
@@ -1054,6 +1160,54 @@ describe('property-based invariants', () => {
         }
       }),
       { numRuns: 1000 },
+    );
+  });
+
+  it('never throws on spacing-heavy syntax-shaped input', () => {
+    fc.assert(
+      fc.property(spacing_heavy_wikitext_string(), (s) => {
+        // Generic fuzzing rarely puts spaces and tabs exactly where line-start and
+        // trim rules matter. This generator does, so it helps guard the scanner's
+        // most spacing-sensitive classification boundaries.
+        const t = tokens(s);
+        expect(t[t.length - 1].type).toBe(TokenType.EOF);
+        for (let idx = 1; idx < t.length; idx++) {
+          expect(t[idx].start).toBe(t[idx - 1].end);
+        }
+      }),
+      { numRuns: 500 },
+    );
+  });
+
+  it('never throws on valid syntax with odd unicode payloads', () => {
+    fc.assert(
+      fc.property(odd_character_wikitext_string(), (s) => {
+        // This property targets real-looking wiki constructs with strange payload
+        // characters. The scanner should stay UTF-16-correct and keep tiling the
+        // source even when content includes code points that are easy to mishandle.
+        const t = tokens(s);
+        expect(t[t.length - 1].type).toBe(TokenType.EOF);
+        for (let idx = 1; idx < t.length; idx++) {
+          expect(t[idx].start).toBe(t[idx - 1].end);
+        }
+      }),
+      { numRuns: 400 },
+    );
+  });
+
+  it('never throws on pathological mixed delimiter input', () => {
+    fc.assert(
+      fc.property(pathological_wikitext_string(), (s) => {
+        // This intentionally throws malformed mixtures at the scanner. The
+        // contract we care about is stability: EOF exists and token tiling is
+        // preserved even when the input is hostile.
+        const t = tokens(s);
+        expect(t[t.length - 1].type).toBe(TokenType.EOF);
+        for (let idx = 1; idx < t.length; idx++) {
+          expect(t[idx].start).toBe(t[idx - 1].end);
+        }
+      }),
+      { numRuns: 600 },
     );
   });
 });
