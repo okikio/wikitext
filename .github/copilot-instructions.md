@@ -19,6 +19,25 @@ Do not duplicate specialized commit, changelog, or file-pattern-specific rules h
 
 This repository builds a standards-aligned wikitext parser and related tooling.
 
+Current product focus is still the wikitext parser itself. Use wikitext as the
+proving ground for parser primitives, recovery behavior, offsets, streaming,
+and session design before generalizing the architecture further.
+
+Treat the parser as one deliberately simple workflow step in a larger future
+document system, not as the whole product. It turns source text into tokens,
+events, trees, and later session state that downstream tools can consume.
+
+Longer-term, the same primitives may grow into a profile-driven structured
+document engine that can support richer CMS blocks, additional markup and
+rich-text families, collaborative editing, offline or local sync, and
+LLM-oriented workflows. Treat that as future direction, not current scope.
+
+When ecosystem compatibility matters, prefer adapters at the edge. The core
+runtime should stay native to this project and optimized for event streams,
+incremental work, and profile-driven behavior. Unified ecosystem support is
+valuable, but should come through unist-compatible exports and optional unified
+adapters until native runtime equivalents exist.
+
 The architecture is event-stream-first. Events are the fundamental output.
 ASTs, HTML, and other outputs are consumers built on top of the event stream.
 
