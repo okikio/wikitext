@@ -40,6 +40,7 @@ Use this shape:
 
 Replace `type`, `scope`, and the summary with real values.
 Do not output placeholder text literally.
+Do not use vague explanation verbs such as `clarify`, `explain`, `document`, `improve`, or `update` unless the rest of the subject names the exact fact, contract, rule, behavior, or workflow being documented.
 
 Good:
 - `fix(parser): preserve trailing blank lines in stringify`
@@ -160,17 +161,21 @@ Avoid:
 
 ### docs
 
-For `docs`, say what understanding improved.
+For `docs`, name the specific fact, contract, rule, workflow, guarantee, limitation, or migration step that the docs now make clear.
 
 Good:
-- `docs(parser): explain why recovery never throws`
-- `docs(events): clarify stack balancing rules for nested sections`
-- `docs(instructions): define changelog-ready commit body expectations`
+- `docs(text_source): explain that plain strings satisfy the TextSource contract`
+- `docs(parser): document why recovery never throws`
+- `docs(events): define stack balancing rules for nested sections`
+- `docs(api): describe when callers must preserve UTF-16 offsets`
 
 Avoid:
 - `docs: update docs`
 - `docs: improve readme`
-- `docs: clarify instructions`
+- `docs: clarify usage`
+- `docs(text_source): clarify purpose and usage of TextSource interface`
+
+Do not describe the writing effort in vague terms such as `clarify`, `improve`, or `update` unless the rest of the subject names the exact thing that is now easier to understand.
 
 ### refactor
 
