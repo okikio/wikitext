@@ -7,7 +7,8 @@
     "jsr:@std/internal@^1.0.10": "1.0.12",
     "jsr:@std/internal@^1.0.12": "1.0.12",
     "jsr:@std/testing@*": "1.0.17",
-    "npm:fast-check@*": "4.5.3"
+    "npm:fast-check@*": "4.5.3",
+    "npm:mitata@*": "1.0.34"
   },
   "jsr": {
     "@std/assert@1.0.18": {
@@ -40,6 +41,9 @@
       "dependencies": [
         "pure-rand"
       ]
+    },
+    "mitata@1.0.34": {
+      "integrity": "sha512-Mc3zrtNBKIMeHSCQ0XqRLo1vbdIx1wvFV9c8NJAiyho6AjNfMY8bVhbS12bwciUdd1t4rj8099CH3N3NFahaUA=="
     },
     "pure-rand@7.0.1": {
       "integrity": "sha512-oTUZM/NAZS8p7ANR3SHh30kXB+zK2r2BPcEn/awJIbOvq82WoMN4p62AWWp3Hhw50G0xMsw1mhIBLqHw64EcNQ=="
