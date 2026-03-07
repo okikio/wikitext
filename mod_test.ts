@@ -20,6 +20,7 @@ import {
   errorEvent,
   exitEvent,
   heading,
+  inlineEvents,
   isToken,
   root,
   slice,
@@ -88,5 +89,14 @@ describe('mod.ts exports', () => {
     const first: WikistNode = tree.children[0];
     expect(tree.type).toBe('root');
     expect(first.type).toBe('heading');
+  });
+
+  it('re-exports inline parser API', () => {
+    const events = Array.from(inlineEvents('plain text', [textEvent(0, 10, {
+      start: { line: 1, column: 1, offset: 0 },
+      end: { line: 1, column: 11, offset: 10 },
+    })]));
+    expect(events).toHaveLength(1);
+    expect(events[0].kind).toBe('text');
   });
 });
