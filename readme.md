@@ -5,10 +5,11 @@
 
 # @okikio/wikitext
 
-An event-stream-first wikitext source parser for Deno and npm. Parses wikitext
-markup into a structured AST ("wikist": Wiki Syntax Tree, extending
-[unist](https://github.com/syntax-tree/unist)) while exposing the raw event
-stream as the fundamental interchange format.
+An event-stream-first wikitext source parser for Deno and npm. It exposes the
+raw token and event layers first, then builds higher-level tree utilities on
+top of those layers. The AST ("wikist": Wiki Syntax Tree, extending
+[unist](https://github.com/syntax-tree/unist)) is part of that public utility
+surface, but the event stream remains the fundamental interchange format.
 
 The parser produces a faithful structural model of all documented wikitext
 constructs. It does not expand templates or render HTML: it is a source parser.
@@ -38,6 +39,25 @@ npx jsr add @okikio/wikitext
 # or
 npm install @okikio/wikitext
 ```
+
+## Current status
+
+The package already ships the foundational public surface:
+
+- `TextSource` and `slice()`
+- token types, token validation, and `tokenize()`
+- event types, constructors, and type guards
+- wikist node interfaces, unions, builders, and type guards
+- `blockEvents()` and `inlineEvents()`
+
+The higher-level orchestration APIs shown in some examples below are still in
+progress:
+
+- `parse()`
+- `stringify()`
+- `events()`
+- `outlineEvents()`
+- `parseChunked()`
 
 ## Quick start
 
@@ -138,6 +158,31 @@ lowest-cost consumers (search, grep). The event stream adds structure
 (enter/exit pairs). The tree builder, HTML compiler, and filter utilities are all
 event consumers.
 
+## Export policy
+
+The package tries to stay utility-first for downstream tooling. In practice,
+that means consumer-facing data shapes and helpers are public, while parser
+implementation scaffolding stays private until there is a stable reason to
+support it.
+
+Public and intended for downstream use:
+
+- source abstractions such as `TextSource`
+- token, event, and AST interfaces and unions
+- builder functions and type guards
+- parser stage entry points such as `tokenize()`, `blockEvents()`, and `inlineEvents()`
+
+Not public yet, and intentionally treated as internal:
+
+- scanner-local context objects
+- matcher result records used only inside one parser stage
+- low-level recovery helpers whose contracts are still evolving
+
+That boundary matters because utility-first does not mean exporting every local
+implementation detail. It means exporting the shapes and helpers that other
+tools can build on safely without coupling themselves to one parser pass's
+current internals.
+
 ### Pipeline modules
 
 | Module | Purpose | Status |
@@ -194,10 +239,13 @@ event consumers.
 | `isToken()` | `token.ts` | Type guard for Token validation |
 | `tokenize()` | `tokenizer.ts` | Generator-based charCodeAt scanner |
 | `blockEvents()` | `block_parser.ts` | Block-level event generator from tokens |
+| `EnterEvent`, `ExitEvent`, `TextEvent`, `TokenEvent`, `ErrorEvent` | `events.ts` | Concrete event interfaces |
 | `WikitextEvent` | `events.ts` | Discriminated union of 5 event kinds |
+| `ErrorEventOptions`, `DiagnosticSeverity` | `events.ts` | Diagnostic support types |
 | `enterEvent()`, `exitEvent()`, ... | `events.ts` | Event constructors |
 | `isEnterEvent()`, `isExitEvent()`, ... | `events.ts` | Event type guards |
-| `WikistNode` | `ast.ts` | Discriminated union of 37 node types |
+| `WikistNode`, `WikistRoot`, `WikistNodeType` | `ast.ts` | Core AST unions and aliases |
+| `WikistParent`, `WikistLiteral`, `WikistVoid` | `ast.ts` | Structural AST category unions |
 | `root()`, `heading()`, `text()`, ... | `ast.ts` | AST builder functions |
 | `isRoot()`, `isHeading()`, `isParent()`, ... | `ast.ts` | AST type guards |
 
