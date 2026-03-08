@@ -17,6 +17,22 @@
  * directly. It only slices strings when a node actually needs a convenience
  * string field such as `target`, `name`, or `value`.
  *
+ * The high-level flow inside one merged text group looks like this:
+ *
+ * ```text
+ * merged text range
+ *   │
+ *   ├─► scan from left to right
+ *   │     ├─► no special opener here  → keep extending plain text
+ *   │     └─► special opener found    → flush plain text, emit inline events
+ *   │
+ *   └─► emit trailing plain text
+ * ```
+ *
+ * That matters because most source bytes are still ordinary text. The parser
+ * stays fast by treating plain text as the default and only paying extra work
+ * when a real opener is present.
+ *
  * The current implementation covers:
  * - apostrophe emphasis (`''`, `'''`, `'''''`)
  * - wikilinks, category links, and image links
@@ -70,34 +86,105 @@ const CC_TILDE = 0x7e;
 const CC_DOUBLE_QUOTE = 0x22;
 const CC_SINGLE_QUOTE = 0x27;
 
+/**
+ * Return whether an ASCII code point can begin one of the inline constructs
+ * this parser knows how to match.
+ *
+ * Keeping the cases in one switch makes the lookup table easier to audit than
+ * duplicating a long boolean expression inside `Uint8Array.from(...)`. The
+ * table still exists because the hot path wants O(1) membership checks while
+ * scanning very large plain-text ranges.
+ */
+function isInlineSpecialStart(code: number): boolean {
+  switch (code) {
+    case CC_LT:
+    case CC_UNDERSCORE:
+    case CC_TILDE:
+    case CC_AMP:
+    case CC_OPEN_BRACKET:
+    case CC_APOSTROPHE:
+    case 0x68:
+    case 0x7b:
+      return true;
+
+    default:
+      return false;
+  }
+}
+
+const INLINE_SPECIAL_START = Uint8Array.from({ length: 128 }, (_, code) =>
+  isInlineSpecialStart(code) ? 1 : 0,
+);
+
+/**
+ * Shared context for scanning one merged text group.
+ *
+ * The block parser may hand us several adjacent text events that are really one
+ * continuous inline region. This context stores the source range, the point
+ * where that region began, and enough line-start information to rebuild precise
+ * `Position` values on demand without storing a `Point` for every code unit.
+ */
 interface TextGroupContext {
+  /** The original source text backing this inline scan. */
   source: TextSource;
+  /** Inclusive start offset of the merged text group. */
   start_offset: number;
+  /** Exclusive end offset of the merged text group. */
   end_offset: number;
+  /** Source position for `start_offset`, used as the anchor for later points. */
   start_point: Point;
+  /** Absolute offsets where each logical line in this text group begins. */
   line_starts: number[];
 }
 
+/**
+ * Result of recognizing one inline construct at the current cursor.
+ *
+ * `end_offset` tells the caller where scanning should resume. `events` contains
+ * the full enter/exit/text sequence for the construct that matched.
+ */
 interface SpecialMatch {
+  /** Exclusive end offset of the recognized construct. */
   end_offset: number;
+  /** Events emitted for the recognized inline construct. */
   events: WikitextEvent[];
 }
 
+/**
+ * Parsed shape of an opening HTML-like tag.
+ *
+ * This is used for generic tags plus special cases such as `nowiki`, `ref`,
+ * and `br`. We keep both the original tag name and a lowercase copy so later
+ * matching can stay case-insensitive without reslicing repeatedly.
+ */
 interface TagOpen {
+  /** Tag name exactly as it appeared in source. */
   tag_name: string;
+  /** Lowercased tag name used for comparisons. */
   tag_name_lower: string;
+  /** Exclusive end offset of the parsed opening tag. */
   end_offset: number;
+  /** Whether the opening tag ended with `/>`. */
   self_closing: boolean;
+  /** Parsed attributes when the tag carried any. */
   attributes?: Readonly<Record<string, string>>;
 }
 
+/** Parsed shape of a closing HTML-like tag such as `</span>`. */
 interface TagClose {
+  /** Lowercased tag name used for close/open matching. */
   tag_name_lower: string;
+  /** Exclusive end offset of the parsed closing tag. */
   end_offset: number;
 }
 
+/**
+ * Range of the matching close tag for a non-self-closing HTML-like node.
+ */
 interface TagBoundary {
+  /** Inclusive start offset of the closing tag. */
   start_offset: number;
+  /** Exclusive end offset of the closing tag. */
   end_offset: number;
 }
 
@@ -141,6 +228,13 @@ export function* inlineEvents(
   }
 }
 
+/**
+ * Parse one merged run of adjacent block-parser text events.
+ *
+ * The block parser may emit several neighboring text events because it works at
+ * token granularity. Inline constructs can span across those boundaries, so we
+ * first merge the run into one scan range and only then resolve inline syntax.
+ */
 function* parseTextGroup(
   source: TextSource,
   events: TextEvent[],
@@ -162,6 +256,21 @@ function* parseTextGroup(
  *
  * Plain text is emitted lazily only when a special construct is found or the
  * range ends.
+ *
+ * Read this as a left-to-right scan with deferred text emission:
+ *
+ * ```text
+ * cursor moves forward
+ *   │
+ *   ├─► match found    → flush [plain_start, cursor), emit match, jump to match end
+ *   └─► no match       → keep scanning
+ *
+ * after loop          → flush trailing plain text
+ * ```
+ *
+ * This shape keeps ordinary text cheap. We do not allocate a text event for
+ * every character. We hold one pending plain range and only emit it when we
+ * have to split around a recognized construct.
  */
 function* parseInlineRange(
   ctx: TextGroupContext,
@@ -173,6 +282,13 @@ function* parseInlineRange(
   let plain_start = start_offset;
 
   while (cursor < end_offset) {
+    // Most bytes inside a merged text group are still ordinary text. Jumping
+    // directly to the next possible opener avoids paying `matchSpecial()` on
+    // every character of long prose-heavy runs, which matters much more once
+    // inputs grow into multi-megabyte and 100 MB benchmark territory.
+    cursor = findNextInlineSpecialStart(ctx.source, cursor, end_offset);
+    if (cursor >= end_offset) break;
+
     const match = matchSpecial(ctx, cursor, end_offset, allow_bare_url);
     if (match === null) {
       cursor++;
@@ -196,25 +312,81 @@ function* parseInlineRange(
   }
 }
 
+/**
+ * Skip forward to the next character that could plausibly open inline syntax.
+ */
+function findNextInlineSpecialStart(
+  source: TextSource,
+  start_offset: number,
+  end_offset: number,
+): number {
+  let cursor = start_offset;
+
+  while (cursor < end_offset) {
+    const code = source.charCodeAt(cursor);
+    if (code < 128 && INLINE_SPECIAL_START[code] === 1) {
+      return cursor;
+    }
+    cursor++;
+  }
+
+  return end_offset;
+}
+
+/**
+ * Try to recognize one inline construct at `cursor`.
+ *
+ * The order inside each dispatch branch matters. For example, comment syntax
+ * must be checked before generic tag parsing because `<!--` also starts with
+ * `<`, and triple braces must be checked before double braces because `{{{`
+ * would otherwise be consumed as a template opener.
+ */
 function matchSpecial(
   ctx: TextGroupContext,
   cursor: number,
   end_offset: number,
   allow_bare_url: boolean,
 ): SpecialMatch | null {
-  return matchComment(ctx, cursor, end_offset) ??
-    matchTagLike(ctx, cursor, end_offset) ??
-    matchBehaviorSwitch(ctx, cursor, end_offset) ??
-    matchSignature(ctx, cursor, end_offset) ??
-    matchHtmlEntity(ctx, cursor, end_offset) ??
-    matchArgument(ctx, cursor, end_offset) ??
-    matchTemplate(ctx, cursor, end_offset) ??
-    matchWikilink(ctx, cursor, end_offset) ??
-    matchExternalLink(ctx, cursor, end_offset) ??
-    (allow_bare_url ? matchBareUrl(ctx, cursor, end_offset) : null) ??
-    matchEmphasis(ctx, cursor, end_offset);
+  const code = ctx.source.charCodeAt(cursor);
+
+  // Most characters cannot begin any special construct. Dispatching on the
+  // first code point avoids calling every matcher at every cursor, which is
+  // especially important on malformed delimiter-heavy input where many matchers
+  // would otherwise rescan the same suffix before failing.
+  switch (code) {
+    case CC_LT:
+      return matchComment(ctx, cursor, end_offset) ??
+        matchTagLike(ctx, cursor, end_offset);
+
+    case CC_UNDERSCORE:
+      return matchBehaviorSwitch(ctx, cursor, end_offset);
+
+    case CC_TILDE:
+      return matchSignature(ctx, cursor, end_offset);
+
+    case CC_AMP:
+      return matchHtmlEntity(ctx, cursor, end_offset);
+
+    case 0x7b:
+      return matchArgument(ctx, cursor, end_offset) ??
+        matchTemplate(ctx, cursor, end_offset);
+
+    case CC_OPEN_BRACKET:
+      return matchWikilink(ctx, cursor, end_offset) ??
+        matchExternalLink(ctx, cursor, end_offset);
+
+    case 0x68:
+      return allow_bare_url ? matchBareUrl(ctx, cursor, end_offset) : null;
+
+    case CC_APOSTROPHE:
+      return matchEmphasis(ctx, cursor, end_offset);
+
+    default:
+      return null;
+  }
 }
 
+/** Match MediaWiki behavior switches such as `__TOC__`. */
 function matchBehaviorSwitch(
   ctx: TextGroupContext,
   cursor: number,
@@ -255,6 +427,7 @@ function matchBehaviorSwitch(
   return null;
 }
 
+/** Match signature runs such as `~~~`, `~~~~`, or `~~~~~`. */
 function matchSignature(
   ctx: TextGroupContext,
   cursor: number,
@@ -275,6 +448,7 @@ function matchSignature(
   };
 }
 
+/** Match one complete HTML entity such as `&amp;` or `&#123;`. */
 function matchHtmlEntity(
   ctx: TextGroupContext,
   cursor: number,
@@ -317,6 +491,7 @@ function matchHtmlEntity(
   };
 }
 
+/** Match one complete HTML comment such as `<!--hidden-->`. */
 function matchComment(
   ctx: TextGroupContext,
   cursor: number,
@@ -335,6 +510,7 @@ function matchComment(
   };
 }
 
+/** Match triple-brace argument syntax such as `{{{name|default}}}`. */
 function matchArgument(
   ctx: TextGroupContext,
   cursor: number,
@@ -365,6 +541,13 @@ function matchArgument(
   };
 }
 
+/**
+ * Match template and parser-function syntax.
+ *
+ * This helper resolves the outer `{{...}}` range first, then finds only the
+ * top-level `|` separators so nested templates or wikilinks do not split the
+ * outer argument list accidentally.
+ */
 function matchTemplate(
   ctx: TextGroupContext,
   cursor: number,
@@ -379,8 +562,14 @@ function matchTemplate(
 
   const inner_start = cursor + 2;
   const inner_end = close_end - 2;
-  const separators = topLevelSeparators(ctx.source, inner_start, inner_end, CC_PIPE);
-  const head_end = separators.length === 0 ? inner_end : separators[0];
+  const first_separator = firstTopLevelSeparator(ctx.source, inner_start, inner_end, CC_PIPE);
+  const separators = first_separator === -1
+    ? EMPTY_SEPARATOR_LIST
+    : [
+      first_separator,
+      ...topLevelSeparators(ctx.source, first_separator + 1, inner_end, CC_PIPE),
+    ];
+  const head_end = first_separator === -1 ? inner_end : first_separator;
   const name_range = trimRange(ctx.source, inner_start, head_end);
   const name = ctx.source.slice(name_range.start, name_range.end);
   if (name.length === 0) return null;
@@ -399,6 +588,13 @@ function matchTemplate(
   return { end_offset: close_end, events };
 }
 
+/**
+ * Parse one template argument inside an already matched template body.
+ *
+ * The argument name is structural metadata, so we trim it. The value is parsed
+ * as another inline range so nested links, templates, and entities still show
+ * up inside argument payloads.
+ */
 function parseTemplateArgument(
   ctx: TextGroupContext,
   start_offset: number,
@@ -422,6 +618,13 @@ function parseTemplateArgument(
   ];
 }
 
+/**
+ * Match double-bracket link syntax.
+ *
+ * Namespace dispatch happens here because the same raw `[[...]]` wrapper can
+ * mean a normal wikilink, category assignment, or image/file link depending on
+ * the trimmed target text.
+ */
 function matchWikilink(
   ctx: TextGroupContext,
   cursor: number,
@@ -434,8 +637,14 @@ function matchWikilink(
 
   const inner_start = cursor + 2;
   const inner_end = close_end - 2;
-  const separators = topLevelSeparators(ctx.source, inner_start, inner_end, CC_PIPE);
-  const target_end = separators.length === 0 ? inner_end : separators[0];
+  const first_separator = firstTopLevelSeparator(ctx.source, inner_start, inner_end, CC_PIPE);
+  const separators = first_separator === -1
+    ? EMPTY_SEPARATOR_LIST
+    : [
+      first_separator,
+      ...topLevelSeparators(ctx.source, first_separator + 1, inner_end, CC_PIPE),
+    ];
+  const target_end = first_separator === -1 ? inner_end : first_separator;
   let target_range = trimRange(ctx.source, inner_start, target_end);
   if (target_range.start === target_range.end) return null;
 
@@ -476,6 +685,12 @@ function matchWikilink(
   return { end_offset: close_end, events };
 }
 
+/**
+ * Match bracketed external-link syntax such as `[https://example.com label]`.
+ *
+ * The URL must begin immediately after `[` for this form to match. If it does
+ * not, later recovery may still find a bare URL inside the brackets.
+ */
 function matchExternalLink(
   ctx: TextGroupContext,
   cursor: number,
@@ -510,6 +725,7 @@ function matchExternalLink(
   return { end_offset: outer_end, events };
 }
 
+/** Match bare `http://` or `https://` URLs in plain text. */
 function matchBareUrl(
   ctx: TextGroupContext,
   cursor: number,
@@ -528,6 +744,14 @@ function matchBareUrl(
   };
 }
 
+/**
+ * Match apostrophe-based emphasis runs.
+ *
+ * Four apostrophes are the awkward case. MediaWiki-style recovery typically
+ * treats that as one literal apostrophe plus a bold run, so we do the same by
+ * emitting the first apostrophe as text and then matching bold from the next
+ * character.
+ */
 function matchEmphasis(
   ctx: TextGroupContext,
   cursor: number,
@@ -555,6 +779,13 @@ function matchEmphasis(
   return matchDelimitedInline(ctx, cursor, end_offset, 2, 'italic');
 }
 
+/**
+ * Parse the contents of one delimited emphasis range.
+ *
+ * Emphasis never crosses a physical line break in this implementation. If no
+ * closing marker is found before the line ends, recovery closes the node at the
+ * line boundary instead of scanning the whole remaining text group.
+ */
 function matchDelimitedInline(
   ctx: TextGroupContext,
   cursor: number,
@@ -579,6 +810,13 @@ function matchDelimitedInline(
   };
 }
 
+/**
+ * Match HTML-like tags and the special inline tags built on that syntax.
+ *
+ * `br`, `nowiki`, and `ref` get custom node types because downstream consumers
+ * are likely to care about them directly. Other tags are normalized into the
+ * generic `html-tag` node with preserved attributes.
+ */
 function matchTagLike(
   ctx: TextGroupContext,
   cursor: number,
@@ -696,6 +934,9 @@ function createTextGroupContext(
   return { source, start_offset, end_offset, start_point, line_starts };
 }
 
+const EMPTY_SEPARATOR_LIST: readonly number[] = [];
+
+/** Emit one plain-text event for the given absolute source range. */
 function emitText(
   ctx: TextGroupContext,
   start_offset: number,
@@ -704,6 +945,13 @@ function emitText(
   return textEvent(start_offset, end_offset, createPosition(ctx, start_offset, end_offset));
 }
 
+/**
+ * Wrap a leaf-like inline node in matching enter and exit events.
+ *
+ * This keeps simple constructs such as entities, comments, and self-closing
+ * tags consistent with the rest of the event stream without forcing each match
+ * helper to rebuild the same enter/exit boilerplate.
+ */
 function wrapLeaf(
   ctx: TextGroupContext,
   start_offset: number,
@@ -715,6 +963,7 @@ function wrapLeaf(
   return [enterEvent(node_type, props, position), exitEvent(node_type, position)];
 }
 
+/** Materialize a nested inline parse into an array for parent node assembly. */
 function collectInlineRange(
   ctx: TextGroupContext,
   start_offset: number,
@@ -724,6 +973,7 @@ function collectInlineRange(
   return Array.from(parseInlineRange(ctx, start_offset, end_offset, allow_bare_url));
 }
 
+/** Create a full `Position` object for one absolute source range. */
 function createPosition(
   ctx: TextGroupContext,
   start_offset: number,
@@ -735,6 +985,13 @@ function createPosition(
   };
 }
 
+/**
+ * Reconstruct one source point from a text-group-local line-start table.
+ *
+ * This is a compromise between precision and allocation cost. We pay for a
+ * binary search into line starts when we need a point, instead of storing a
+ * full point table for every offset in the group.
+ */
 function pointAt(ctx: TextGroupContext, offset: number): Point {
   const line_index = lineIndexAt(ctx.line_starts, offset);
   if (line_index === 0) {
@@ -753,6 +1010,7 @@ function pointAt(ctx: TextGroupContext, offset: number): Point {
   };
 }
 
+/** Find the last recorded line start at or before `offset`. */
 function lineIndexAt(line_starts: number[], offset: number): number {
   let low = 0;
   let high = line_starts.length - 1;
@@ -772,6 +1030,12 @@ function lineIndexAt(line_starts: number[], offset: number): number {
   return 0;
 }
 
+/**
+ * Find the close boundary for a balanced opener/closer pair.
+ *
+ * The returned offset is the exclusive end of the closing delimiter. `-1`
+ * means the construct never closed cleanly inside the requested range.
+ */
 function findBalanced(
   source: TextSource,
   start_offset: number,
@@ -779,16 +1043,25 @@ function findBalanced(
   open: string,
   close: string,
 ): number {
+  // This helper is on the hot recovery path for templates, arguments, and
+  // wikilinks. The cheap first-character checks matter because most cursor
+  // positions are not actually the start of `open` or `close`, and calling
+  // hasLiteral() at every byte made malformed inputs much more expensive.
+  const open_first = open.charCodeAt(0);
+  const close_first = close.charCodeAt(0);
   let depth = 0;
   let cursor = start_offset;
 
   while (cursor < end_offset) {
-    if (hasLiteral(source, cursor, end_offset, open)) {
+    const code = source.charCodeAt(cursor);
+
+    if (code === open_first && hasLiteral(source, cursor, end_offset, open)) {
       depth++;
       cursor += open.length;
       continue;
     }
-    if (hasLiteral(source, cursor, end_offset, close)) {
+
+    if (code === close_first && hasLiteral(source, cursor, end_offset, close)) {
       depth--;
       cursor += close.length;
       if (depth === 0) return cursor;
@@ -800,51 +1073,68 @@ function findBalanced(
   return -1;
 }
 
+/**
+ * Collect every separator that appears at the current nesting level.
+ *
+ * Example: in `{{A|x={{B|y}}|z}}`, the outer template has two top-level `|`
+ * separators even though there is another `|` inside the nested `{{B|y}}`.
+ */
 function topLevelSeparators(
   source: TextSource,
   start_offset: number,
   end_offset: number,
   separator: number,
 ): number[] {
+  // We only want separators that live at the current nesting level. For
+  // example, the `|` inside `{{T|x}}` must not split the surrounding template
+  // or wikilink. The depth counters track the three nested inline containers we
+  // currently understand well enough to treat as opaque while scanning.
   const result: number[] = [];
   let depth_square = 0;
   let depth_template = 0;
   let depth_argument = 0;
 
   for (let cursor = start_offset; cursor < end_offset; cursor++) {
-    if (hasLiteral(source, cursor, end_offset, '{{{')) {
+    const code = source.charCodeAt(cursor);
+
+    if (code === 0x7b && hasLiteral(source, cursor, end_offset, '{{{')) {
       depth_argument++;
       cursor += 2;
       continue;
     }
-    if (hasLiteral(source, cursor, end_offset, '}}}')) {
+
+    if (code === 0x7d && hasLiteral(source, cursor, end_offset, '}}}')) {
       if (depth_argument > 0) depth_argument--;
       cursor += 2;
       continue;
     }
-    if (hasLiteral(source, cursor, end_offset, '{{')) {
+
+    if (code === 0x7b && hasLiteral(source, cursor, end_offset, '{{')) {
       depth_template++;
       cursor += 1;
       continue;
     }
-    if (hasLiteral(source, cursor, end_offset, '}}')) {
+
+    if (code === 0x7d && hasLiteral(source, cursor, end_offset, '}}')) {
       if (depth_template > 0) depth_template--;
       cursor += 1;
       continue;
     }
-    if (hasLiteral(source, cursor, end_offset, '[[')) {
+
+    if (code === CC_OPEN_BRACKET && hasLiteral(source, cursor, end_offset, '[[')) {
       depth_square++;
       cursor += 1;
       continue;
     }
-    if (hasLiteral(source, cursor, end_offset, ']]')) {
+
+    if (code === CC_CLOSE_BRACKET && hasLiteral(source, cursor, end_offset, ']]')) {
       if (depth_square > 0) depth_square--;
       cursor += 1;
       continue;
     }
 
     if (
-      source.charCodeAt(cursor) === separator &&
+      code === separator &&
       depth_square === 0 &&
       depth_template === 0 &&
       depth_argument === 0
@@ -856,16 +1146,74 @@ function topLevelSeparators(
   return result;
 }
 
+/** Find only the first top-level separator without allocating an array. */
 function firstTopLevelSeparator(
   source: TextSource,
   start_offset: number,
   end_offset: number,
   separator: number,
 ): number {
-  const separators = topLevelSeparators(source, start_offset, end_offset, separator);
-  return separators.length === 0 ? -1 : separators[0];
+  // Many callers only need the first separator. Keeping a dedicated fast path
+  // avoids allocating and filling an array that would be thrown away
+  // immediately. This matters for the common `name|value` shape inside inline
+  // constructs.
+  let depth_square = 0;
+  let depth_template = 0;
+  let depth_argument = 0;
+
+  for (let cursor = start_offset; cursor < end_offset; cursor++) {
+    const code = source.charCodeAt(cursor);
+
+    if (code === 0x7b && hasLiteral(source, cursor, end_offset, '{{{')) {
+      depth_argument++;
+      cursor += 2;
+      continue;
+    }
+
+    if (code === 0x7d && hasLiteral(source, cursor, end_offset, '}}}')) {
+      if (depth_argument > 0) depth_argument--;
+      cursor += 2;
+      continue;
+    }
+
+    if (code === 0x7b && hasLiteral(source, cursor, end_offset, '{{')) {
+      depth_template++;
+      cursor += 1;
+      continue;
+    }
+
+    if (code === 0x7d && hasLiteral(source, cursor, end_offset, '}}')) {
+      if (depth_template > 0) depth_template--;
+      cursor += 1;
+      continue;
+    }
+
+    if (code === CC_OPEN_BRACKET && hasLiteral(source, cursor, end_offset, '[[')) {
+      depth_square++;
+      cursor += 1;
+      continue;
+    }
+
+    if (code === CC_CLOSE_BRACKET && hasLiteral(source, cursor, end_offset, ']]')) {
+      if (depth_square > 0) depth_square--;
+      cursor += 1;
+      continue;
+    }
+
+    if (
+      code === separator &&
+      depth_square === 0 &&
+      depth_template === 0 &&
+      depth_argument === 0
+    ) {
+      return cursor;
+    }
+  }
+
+  return -1;
 }
 
+/** Find the first top-level `=` inside a range, if any. */
 function topLevelEquals(
   source: TextSource,
   start_offset: number,
@@ -874,6 +1222,7 @@ function topLevelEquals(
   return firstTopLevelSeparator(source, start_offset, end_offset, CC_EQUALS);
 }
 
+/** Trim ASCII space, tab, and line-break padding around a source range. */
 function trimRange(
   source: TextSource,
   start_offset: number,
@@ -897,10 +1246,12 @@ function trimRange(
   return { start, end };
 }
 
+/** Convert a `{ start, end }` range object into a tuple for `slice()`. */
 function rangeTuple(range: { start: number; end: number }): [number, number] {
   return [range.start, range.end];
 }
 
+/** Find the first line ending after `start_offset`, or the range end. */
 function findLineEnd(source: TextSource, start_offset: number, end_offset: number): number {
   for (let cursor = start_offset; cursor < end_offset; cursor++) {
     const code = source.charCodeAt(cursor);
@@ -909,6 +1260,9 @@ function findLineEnd(source: TextSource, start_offset: number, end_offset: numbe
   return end_offset;
 }
 
+/**
+ * Find the next apostrophe run that is long enough to close an emphasis node.
+ */
 function findApostropheClose(
   source: TextSource,
   start_offset: number,
@@ -924,6 +1278,14 @@ function findApostropheClose(
   return -1;
 }
 
+/**
+ * Parse one opening HTML-like tag.
+ *
+ * This helper is intentionally permissive about attributes because the parser's
+ * job is to recover structure from source text, not to enforce a full HTML
+ * validator. If the tag opener never reaches `>`, we return `null` and let the
+ * caller fall back to plain text.
+ */
 function parseTagOpen(
   source: TextSource,
   start_offset: number,
@@ -971,6 +1333,7 @@ function parseTagOpen(
   return null;
 }
 
+/** Parse one closing HTML-like tag such as `</span>`. */
 function parseClosingTag(
   source: TextSource,
   start_offset: number,
@@ -1001,16 +1364,30 @@ function parseClosingTag(
   };
 }
 
+/**
+ * Find the matching close tag for a previously parsed opening tag.
+ *
+ * Nested tags of the same name increase depth. Comments are skipped as opaque
+ * regions so fake close tags inside `<!-- ... -->` do not interfere with tag
+ * recovery.
+ */
 function findMatchingCloseTag(
   source: TextSource,
   open_tag: TagOpen,
   start_offset: number,
   end_offset: number,
 ): TagBoundary | null {
+  // Generic tag matching can get expensive on malformed input because the naive
+  // approach checks every byte as a possible tag boundary. We skip directly to
+  // the next `<` because only that character can begin a relevant open tag,
+  // close tag, or comment opener.
   let cursor = start_offset;
   let depth = 0;
 
   while (cursor < end_offset) {
+    while (cursor < end_offset && source.charCodeAt(cursor) !== CC_LT) cursor++;
+    if (cursor >= end_offset) break;
+
     if (hasLiteral(source, cursor, end_offset, '<!--')) {
       const close = indexOfLiteral(source, '-->', cursor + 4, end_offset);
       cursor = close === -1 ? end_offset : close + 3;
@@ -1040,6 +1417,13 @@ function findMatchingCloseTag(
   return null;
 }
 
+/**
+ * Parse loose HTML-style attributes from the raw attribute segment.
+ *
+ * Attribute parsing here is recovery-oriented. Unknown attribute names are
+ * preserved, missing values become empty strings, and malformed fragments are
+ * skipped rather than throwing.
+ */
 function parseAttributes(
   source: TextSource,
   start_offset: number,
@@ -1107,6 +1491,7 @@ function parseAttributes(
   return result;
 }
 
+/** Reduce raw tag attributes to the public reference-node props we expose. */
 function referenceProps(
   attributes?: Readonly<Record<string, string>>,
 ): Readonly<Record<string, unknown>> {
@@ -1117,6 +1502,7 @@ function referenceProps(
   return props;
 }
 
+/** Check whether `literal` appears exactly at `offset`. */
 function hasLiteral(
   source: TextSource,
   offset: number,
@@ -1130,18 +1516,27 @@ function hasLiteral(
   return true;
 }
 
+/** Find the next occurrence of a literal string within a source range. */
 function indexOfLiteral(
   source: TextSource,
   literal: string,
   start_offset: number,
   end_offset: number,
 ): number {
+  // This is a low-level scan helper used by comment and tag recovery. The fast
+  // first-character guard keeps it cheap on long regions that contain very few
+  // actual candidates for the requested literal.
+  const first = literal.charCodeAt(0);
+
   for (let cursor = start_offset; cursor + literal.length <= end_offset; cursor++) {
-    if (hasLiteral(source, cursor, end_offset, literal)) return cursor;
+    if (source.charCodeAt(cursor) === first && hasLiteral(source, cursor, end_offset, literal)) {
+      return cursor;
+    }
   }
   return -1;
 }
 
+/** Find the next occurrence of one character code within a source range. */
 function indexOfChar(
   source: TextSource,
   code: number,
@@ -1154,6 +1549,7 @@ function indexOfChar(
   return -1;
 }
 
+/** Count how many times the same character repeats from `offset`. */
 function repeatedCharRun(
   source: TextSource,
   offset: number,
@@ -1165,6 +1561,12 @@ function repeatedCharRun(
   return run;
 }
 
+/**
+ * Scan a bare or bracketed external-link URL prefix.
+ *
+ * Only `http://` and `https://` are recognized today. The scan stops before
+ * ASCII whitespace, a closing bracket, tag boundary characters, or quotes.
+ */
 function scanUrl(source: TextSource, start_offset: number, end_offset: number): number {
   const is_http = hasLiteral(source, start_offset, end_offset, 'http://');
   const is_https = hasLiteral(source, start_offset, end_offset, 'https://');
@@ -1191,18 +1593,22 @@ function scanUrl(source: TextSource, start_offset: number, end_offset: number): 
   return cursor;
 }
 
+/** Whether a code point is an ASCII letter. */
 function isAsciiLetter(code: number): boolean {
   return (code >= 0x41 && code <= 0x5a) || (code >= 0x61 && code <= 0x7a);
 }
 
+/** Whether a code point is an ASCII digit. */
 function isAsciiDigit(code: number): boolean {
   return code >= 0x30 && code <= 0x39;
 }
 
+/** Whether a code point is ASCII alphanumeric. */
 function isAsciiAlphanumeric(code: number): boolean {
   return isAsciiLetter(code) || isAsciiDigit(code);
 }
 
+/** Whether a code point is a hexadecimal digit. */
 function isHexDigit(code: number): boolean {
   return isAsciiDigit(code) ||
     (code >= 0x41 && code <= 0x46) ||
