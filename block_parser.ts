@@ -321,12 +321,15 @@ function* parseHeading(
     advance(buf);
   }
 
+  let contentStartIndex = 0;
+  let contentEndIndex = lineTokens.length;
+
   // Trim trailing whitespace.
   while (
-    lineTokens.length > 0 &&
-    lineTokens[lineTokens.length - 1].type === TokenType.WHITESPACE
+    contentEndIndex > contentStartIndex &&
+    lineTokens[contentEndIndex - 1].type === TokenType.WHITESPACE
   ) {
-    lineTokens.pop();
+    contentEndIndex--;
   }
 
   // Trim trailing close marker (HEADING_MARKER_CLOSE or EQUALS).
@@ -334,33 +337,34 @@ function* parseHeading(
   // heading content instead of being mistaken for the closing marker.
   let endOffset = marker.end;
   if (
-    lineTokens.length > 0 &&
-    (lineTokens[lineTokens.length - 1].type === TokenType.HEADING_MARKER_CLOSE ||
-      lineTokens[lineTokens.length - 1].type === TokenType.EQUALS)
+    contentEndIndex > contentStartIndex &&
+    (lineTokens[contentEndIndex - 1].type === TokenType.HEADING_MARKER_CLOSE ||
+      lineTokens[contentEndIndex - 1].type === TokenType.EQUALS)
   ) {
-    const closeTok = lineTokens.pop()!;
+    const closeTok = lineTokens[contentEndIndex - 1];
+    contentEndIndex--;
     endOffset = closeTok.end;
   }
 
   // Trim whitespace between content and the (now-removed) close marker.
   while (
-    lineTokens.length > 0 &&
-    lineTokens[lineTokens.length - 1].type === TokenType.WHITESPACE
+    contentEndIndex > contentStartIndex &&
+    lineTokens[contentEndIndex - 1].type === TokenType.WHITESPACE
   ) {
-    lineTokens.pop();
+    contentEndIndex--;
   }
 
   // Trim leading whitespace after the heading marker.
   while (
-    lineTokens.length > 0 &&
-    lineTokens[0].type === TokenType.WHITESPACE
+    contentStartIndex < contentEndIndex &&
+    lineTokens[contentStartIndex].type === TokenType.WHITESPACE
   ) {
-    lineTokens.shift();
+    contentStartIndex++;
   }
 
   // Use endOffset from the last remaining token if we have content.
-  if (lineTokens.length > 0) {
-    endOffset = Math.max(endOffset, lineTokens[lineTokens.length - 1].end);
+  if (contentStartIndex < contentEndIndex) {
+    endOffset = Math.max(endOffset, lineTokens[contentEndIndex - 1].end);
   }
 
   const endPt = pointAt(buf.tracker, endOffset);
@@ -368,12 +372,15 @@ function* parseHeading(
 
   yield enterEvent('heading', { level }, headingPos);
 
-  // Emit text events for the content tokens.
-  for (const ct of lineTokens) {
-    const ctStart = pointAt(buf.tracker, ct.start);
-    const ctEnd = pointAt(buf.tracker, ct.end);
-    yield textEvent(ct.start, ct.end, pos(ctStart, ctEnd));
-  }
+  // The inline parser only cares about source ranges, not original tokenizer
+  // token boundaries. Merging contiguous spans here avoids re-merging the same
+  // text immediately in the next stage.
+  yield* emitMergedTextEvents(
+    buf.tracker,
+    lineTokens,
+    contentStartIndex,
+    contentEndIndex,
+  );
 
   yield exitEvent('heading', headingPos);
 }
@@ -465,11 +472,7 @@ function* parseParagraph(
   // Inline markup is deliberately left unresolved here. Paragraph parsing owns
   // block boundaries; the later inline stage owns links, templates, emphasis,
   // and other nested inline syntax.
-  for (const ct of contentTokens) {
-    const ctStart = pointAt(buf.tracker, ct.start);
-    const ctEnd = pointAt(buf.tracker, ct.end);
-    yield textEvent(ct.start, ct.end, pos(ctStart, ctEnd));
-  }
+  yield* emitMergedTextEvents(buf.tracker, contentTokens, 0, contentTokens.length);
 
   yield exitEvent('paragraph', paraPos);
 }
@@ -604,12 +607,7 @@ function* parseList(
       advance(buf);
     }
 
-    // Emit text events for line content.
-    for (const ct of contentTokens) {
-      const ctStart = pointAt(buf.tracker, ct.start);
-      const ctEnd = pointAt(buf.tracker, ct.end);
-      yield textEvent(ct.start, ct.end, pos(ctStart, ctEnd));
-    }
+    yield* emitMergedTextEvents(buf.tracker, contentTokens, 0, contentTokens.length);
 
     const itemEndPt = pointAt(buf.tracker, lineEndOffset);
 
@@ -929,12 +927,7 @@ function* parseTableCells(
       advance(buf);
     }
 
-    // Emit text for the cell content.
-    for (const ct of contentTokens) {
-      const ctStart = pointAt(buf.tracker, ct.start);
-      const ctEnd = pointAt(buf.tracker, ct.end);
-      yield textEvent(ct.start, ct.end, pos(ctStart, ctEnd));
-    }
+    yield* emitMergedTextEvents(buf.tracker, contentTokens, 0, contentTokens.length);
 
     const cellEndPt = contentTokens.length > 0
       ? pointAt(buf.tracker, contentTokens[contentTokens.length - 1].end)
@@ -966,16 +959,50 @@ function* closeRow(buf: TokenBuffer): Generator<WikitextEvent> {
 function* emitLineContent(
   buf: TokenBuffer,
 ): Generator<WikitextEvent> {
+  const lineTokens: Token[] = [];
+
   while (peek(buf) !== null) {
     const t = peek(buf)!;
     if (t.type === TokenType.NEWLINE || t.type === TokenType.EOF) break;
     // Used for simple single-line payloads such as captions where the block
     // container is already known and only raw text needs to be forwarded.
-    const tStart = pointAt(buf.tracker, t.start);
-    const tEnd = pointAt(buf.tracker, t.end);
-    yield textEvent(t.start, t.end, pos(tStart, tEnd));
+    lineTokens.push(t);
     advance(buf);
   }
+
+  yield* emitMergedTextEvents(buf.tracker, lineTokens, 0, lineTokens.length);
+}
+
+/** Emit merged text events for contiguous token spans inside one line. */
+function* emitMergedTextEvents(
+  tracker: LineTracker,
+  tokens: readonly Token[],
+  startIndex: number,
+  endIndex: number,
+): Generator<WikitextEvent> {
+  if (startIndex >= endIndex) return;
+
+  let start = tokens[startIndex].start;
+  let end = tokens[startIndex].end;
+
+  for (let index = startIndex + 1; index < endIndex; index++) {
+    const token = tokens[index];
+    if (token.start === end) {
+      end = token.end;
+      continue;
+    }
+
+    const eventStart = pointAt(tracker, start);
+    const eventEnd = pointAt(tracker, end);
+    yield textEvent(start, end, pos(eventStart, eventEnd));
+
+    start = token.start;
+    end = token.end;
+  }
+
+  const eventStart = pointAt(tracker, start);
+  const eventEnd = pointAt(tracker, end);
+  yield textEvent(start, end, pos(eventStart, eventEnd));
 }
 
 /** Concatenate text of tokens by slicing from the source. */
@@ -1024,16 +1051,17 @@ function* parsePreformatted(
     advance(buf);
 
     // Emit content of this line.
+    const lineTokens: Token[] = [];
     while (peek(buf) !== null) {
       const t = peek(buf)!;
       if (t.type === TokenType.NEWLINE || t.type === TokenType.EOF) break;
       // The leading space is structural and already consumed, so the emitted
       // text starts with the first token after that marker.
-      const tStart = pointAt(buf.tracker, t.start);
-      const tEnd = pointAt(buf.tracker, t.end);
-      yield textEvent(t.start, t.end, pos(tStart, tEnd));
+      lineTokens.push(t);
       advance(buf);
     }
+
+    yield* emitMergedTextEvents(buf.tracker, lineTokens, 0, lineTokens.length);
 
     // Consume newline.
     if (peek(buf) !== null && peek(buf)!.type === TokenType.NEWLINE) {
