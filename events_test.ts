@@ -39,7 +39,7 @@ const pos: Position = {
   end: { line: 1, column: 10, offset: 9 },
 };
 
-/** A different position to test field identity. */
+/** A second position to prove constructors preserve the provided reference. */
 const pos2: Position = {
   start: { line: 3, column: 5, offset: 20 },
   end: { line: 3, column: 15, offset: 30 },
@@ -187,6 +187,10 @@ describe('errorEvent', () => {
 
   it('includes no extra keys when no options passed', () => {
     const evt = errorEvent('msg', pos);
+
+    // Plain diagnostics should stay minimal. This protects against refactors
+    // that start materializing noisy `undefined` metadata fields in debug logs.
+
     expect(evt.severity).toBeUndefined();
     expect(evt.code).toBeUndefined();
     expect(evt.recoverable).toBeUndefined();
