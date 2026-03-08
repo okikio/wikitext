@@ -101,7 +101,7 @@ describe('blockEvents — headings', () => {
     const struct = structure(events);
     expect(struct).toContainEqual(['enter', 'heading']);
     expect(struct).toContainEqual(['exit', 'heading']);
-    expect(textContent(events, input)).toContain('Open');
+    expect(textContent(events, input).join('')).toContain('Open');
   });
 
   it('handles heading followed by paragraph', () => {
@@ -157,7 +157,7 @@ describe('blockEvents — paragraphs', () => {
       ['exit', 'paragraph'],
       ['exit', 'root'],
     ]);
-    expect(textContent(events, input)).toContain('Hello');
+    expect(textContent(events, input).join('')).toContain('Hello');
   });
 
   it('handles multi-line paragraph', () => {
@@ -254,7 +254,7 @@ describe('blockEvents — bullet lists', () => {
   it('emits list item content as text', () => {
     const input = '* Hello';
     const events = parse(input);
-    expect(textContent(events, input)).toContain('Hello');
+    expect(textContent(events, input).join('')).toContain('Hello');
   });
 });
 
