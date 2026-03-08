@@ -1,5 +1,14 @@
 // deno-lint-ignore-file no-import-prefix no-unversioned-import
 
+/**
+ * Shared property-test generators for parser and tokenizer suites.
+ *
+ * These arbitraries are intentionally biased toward syntax-heavy and recovery-
+ * heavy input. The goal is not to mimic real articles perfectly. The goal is
+ * to push the parser into the boundaries where delimiter handling, trimming,
+ * and recovery logic most often regress.
+ */
+
 import * as fc from 'npm:fast-check';
 
 /** Generate strings biased toward general wikitext syntax. */
@@ -67,6 +76,8 @@ export function spacing_heavy_wikitext_string(max_chunks = 80): fc.Arbitrary<str
 		fc.string({ minLength: 0, maxLength: 6 }),
 	);
 
+	// Joining many short chunks is deliberate: spacing bugs often live at the
+	// boundary where a delimiter chunk meets a whitespace chunk.
 	return fc.array(chunk, { minLength: 0, maxLength: max_chunks })
 		.map((chunks) => chunks.join(''));
 }
@@ -113,6 +124,8 @@ export function odd_character_wikitext_string(max_chunks = 60): fc.Arbitrary<str
 		'\n',
 	);
 
+	// Mixing valid markup chunks with odd payload text preserves enough parser
+	// structure to stay meaningful while still shaking out Unicode assumptions.
 	return fc.array(fc.oneof(valid_chunk, odd), { minLength: 0, maxLength: max_chunks })
 		.map((chunks) => chunks.join(''));
 }
@@ -167,6 +180,9 @@ export function pathological_wikitext_string(max_chunks = 80): fc.Arbitrary<stri
 		fc.string({ minLength: 0, maxLength: 8 }),
 	);
 
+	// These inputs are hostile on purpose. They cluster half-open delimiters,
+	// mismatched closers, and valid constructs together so recovery code gets the
+	// kind of stress that ordinary random strings rarely provide.
 	return fc.array(chunk, { minLength: 0, maxLength: max_chunks })
 		.map((chunks) => chunks.join(''));
 }
