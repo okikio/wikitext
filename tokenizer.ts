@@ -284,6 +284,9 @@ function isAsciiAlphanumeric(code: number): boolean {
 export function* tokenize(source: TextSource): Generator<Token> {
   const len = source.length;
   let i = 0;
+  // This single flag carries the tokenizer's line-sensitive context. Many
+  // delimiters change meaning at line start, so keeping it explicit here makes
+  // the hot loop easier to reason about during debugging.
   let lineStart = true;
 
   while (i < len) {
@@ -400,6 +403,9 @@ export function* tokenize(source: TextSource): Generator<Token> {
           if (c !== CC_SPACE && c !== CC_TAB) break;
           i++;
         }
+        // Tabs never preserve line-start meaning. That is different from list
+        // markers, where the next marker on the same line can still be part of
+        // the structural prefix.
         lineStart = false;
         yield tok(TokenType.WHITESPACE, start, i);
         continue;
@@ -428,6 +434,9 @@ export function* tokenize(source: TextSource): Generator<Token> {
         const wasLineStart = lineStart;
         const start = i;
         while (i < len && source.charCodeAt(i) === CC_EQUALS) i++;
+        // Once the run is consumed, the rest of the line is no longer at a
+        // line boundary, regardless of whether this became HEADING_MARKER or
+        // plain EQUALS.
         lineStart = false;
         yield tok(wasLineStart ? TokenType.HEADING_MARKER : TokenType.EQUALS, start, i);
         continue;
@@ -628,6 +637,9 @@ export function* tokenize(source: TextSource): Generator<Token> {
             }
             i++;
           }
+          // Recovery keeps the stream tiled when the comment never closes. The
+          // caller can still see where comment syntax started, and the trailing
+          // text is not lost.
           if (!found && i > contentStart) {
             yield tok(TokenType.TEXT, contentStart, i);
           }
@@ -853,6 +865,8 @@ export function* tokenize(source: TextSource): Generator<Token> {
           yield tok(TokenType.LINK_OPEN, i, i + 2);
           i += 2;
         } else {
+          // A single `[` only means "maybe external link" at this stage. The
+          // inline parser validates the URL shape later.
           yield tok(TokenType.EXT_LINK_OPEN, i, i + 1);
           i += 1;
         }
@@ -919,6 +933,9 @@ export function* tokenize(source: TextSource): Generator<Token> {
             lineStart = false;
             continue;
           }
+          // Bare `|` at line start can begin a table data row, so it remains a
+          // structural token even before the block parser has confirmed that we
+          // are really inside a table.
           yield tok(TokenType.PIPE, i, i + 1);
           i += 1;
           lineStart = false;
@@ -962,6 +979,8 @@ export function* tokenize(source: TextSource): Generator<Token> {
       case CC_APOSTROPHE: {
         const start = i;
         while (i < len && source.charCodeAt(i) === CC_APOSTROPHE) i++;
+        // Single apostrophes are overwhelmingly ordinary punctuation. Treating
+        // only longer runs as structural keeps prose cheap and easier to debug.
         if (i - start >= 2) {
           yield tok(TokenType.APOSTROPHE_RUN, start, i);
         } else {
