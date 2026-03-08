@@ -30,14 +30,19 @@ function parse(input: string): WikitextEvent[] {
   return [...blockEvents(input, tokenize(input))];
 }
 
-/** Extract only enter/exit events as [kind, node_type] tuples for structure assertions. */
+/**
+ * Extract only enter/exit events as `[kind, node_type]` tuples.
+ *
+ * Most block parser assertions care about nesting shape, not exact offsets, so
+ * this helper strips the stream down to the structural signal under test.
+ */
 function structure(events: WikitextEvent[]): [string, string][] {
   return events
     .filter((e): e is EnterEvent | ExitEvent => e.kind === 'enter' || e.kind === 'exit')
     .map((e) => [e.kind, e.node_type]);
 }
 
-/** Extract text content from text events. */
+/** Recover source slices for text events so content assertions stay readable. */
 function textContent(events: WikitextEvent[], source: string): string[] {
   return events
     .filter((e) => e.kind === 'text')
@@ -47,7 +52,7 @@ function textContent(events: WikitextEvent[], source: string): string[] {
     });
 }
 
-/** Get the props from the first enter event of a given node type. */
+/** Read the props from the first enter event of a given node type. */
 function firstProps(events: WikitextEvent[], nodeType: string): Record<string, unknown> {
   const enter = events.find(
     (e): e is EnterEvent => e.kind === 'enter' && e.node_type === nodeType,
@@ -393,6 +398,11 @@ describe('blockEvents — tables', () => {
     const input = '{|\n| Cell';
     const events = parse(input);
     const errors = events.filter((e) => e.kind === 'error');
+
+    // A malformed table still needs a balanced table envelope so downstream
+    // consumers do not inherit broken nesting on top of the original syntax
+    // problem.
+
     expect(errors.length).toBeGreaterThan(0);
     // Table still has enter and exit.
     const struct = structure(events);
