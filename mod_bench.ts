@@ -70,6 +70,18 @@ function repeatBlock(unit: string, repeat: number): string {
   return unit.repeat(repeat);
 }
 
+/**
+ * Repeat an ASCII unit until the resulting text reaches at least `minimumSize`.
+ *
+ * This is used for large-file benchmarks where the on-disk size matters more
+ * than the exact block count. The units in this file are ASCII-only, so code
+ * unit length is a practical stand-in for byte size.
+ */
+function repeatToMinimumSize(unit: string, minimumSize: number): string {
+  const repeat = Math.ceil(minimumSize / unit.length);
+  return unit.repeat(repeat);
+}
+
 /** Minimal state shape used by mitata parameterized benchmarks in this file. */
 type RangeState = {
   get(name: string): number;
@@ -280,6 +292,37 @@ const SYNTHETIC_ARTICLE_INPUTS = [
   ].join('\n'), 52),
 ] as const;
 const nextSyntheticArticle = cycleInputs(SYNTHETIC_ARTICLE_INPUTS);
+
+// --- Opt-in large-file scenario (~100 MB) ---
+//
+// Normal benchmark runs stay focused on tight iteration counts and reasonably
+// quick feedback. Large-file work is a different question: can one end-to-end
+// parse phase chew through a document big enough to matter for editor, agent,
+// or LLM workflows without causing an obvious stall? Those runs are expensive,
+// so they stay behind an explicit env flag.
+
+const LARGE_FILE_MINIMUM_SIZE = 100 * 1024 * 1024;
+const LARGE_STREAMING_ARTICLE_UNIT = [
+  '== Lead ==',
+  "A [[Main Page|home]] link with ''italic'', '''bold''', and {{Card|name=value|body={{Nested|x=1}}}}.",
+  '* Bullet item with [https://example.com source] and &amp; entity.',
+  '# Ordered item with <ref name="cite-1">inline reference text</ref>.',
+  '{| class="wikitable"',
+  '! Name !! Value',
+  '|-',
+  '| Alpha || [[Page|Display]]',
+  '|-',
+  '| Beta || {{Template|arg=value|body=<span class="x">inline</span>}}',
+  '|}',
+  '<nowiki>[[literal]] {{literal}}</nowiki>',
+  '__TOC__ ~~~~',
+  '',
+].join('\n');
+const LARGE_STREAMING_ARTICLE_TEXT = repeatToMinimumSize(
+  `${LARGE_STREAMING_ARTICLE_UNIT}\n`,
+  LARGE_FILE_MINIMUM_SIZE,
+);
+const ENABLE_100MB_BENCH = Deno.env.get('WIKITEXT_BENCH_100MB') === '1';
 
 /** Drain a generator, returning the token count to prevent dead-code elimination. */
 function drainTokenize(input: string): number {
@@ -519,5 +562,21 @@ summary(() => {
     do_not_optimize(drainInlineEvents(nextSyntheticArticle()));
   }).gc('inner');
 });
+
+if (ENABLE_100MB_BENCH) {
+  summary(() => {
+    bench('tokenize: large mixed article (~100 MB)', () => {
+      do_not_optimize(drainTokenize(LARGE_STREAMING_ARTICLE_TEXT));
+    }).gc('inner');
+
+    bench('blockEvents: large mixed article (~100 MB)', () => {
+      do_not_optimize(drainBlockEvents(LARGE_STREAMING_ARTICLE_TEXT));
+    }).gc('inner');
+
+    bench('inlineEvents: large mixed article (~100 MB)', () => {
+      do_not_optimize(drainInlineEvents(LARGE_STREAMING_ARTICLE_TEXT));
+    }).gc('inner');
+  });
+}
 
 await run();
