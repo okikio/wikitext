@@ -99,6 +99,8 @@ function assertNoLeak(
   thresholdKB = 512,
   warmupCount = 1_000,
 ): void {
+  // Warm up first so the comparison is not polluted by JIT compilation or one-
+  // time runtime setup. We want to catch retained memory, not startup cost.
   for (let i = 0; i < warmupCount; i++) fn();
   forceGCIfAvailable();
 
@@ -106,6 +108,9 @@ function assertNoLeak(
   forceGCIfAvailable();
   const after1 = readHeapUsedBytes();
 
+  // Repeating the same workload after the first stabilized measurement makes a
+  // second-growth delta much more suspicious. By this point, transient setup
+  // objects should already be gone if nothing is leaking.
   for (let i = 0; i < iterCount; i++) fn();
   forceGCIfAvailable();
   const after2 = readHeapUsedBytes();
