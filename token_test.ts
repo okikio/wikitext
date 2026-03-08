@@ -1,7 +1,7 @@
 /**
  * Dedicated tests for token.ts.
  *
- * Covers the TokenType constant map (all 45 entries), the Token
+ * Covers the TokenType constant map, the Token
  * interface contract, and the isToken() type guard with edge cases,
  * boundary values, and property-based invariants.
  */
@@ -91,6 +91,8 @@ describe('TokenType', () => {
   });
 
   it('has exactly 39 token types', () => {
+    // Vocabulary changes are public-surface changes. Keeping the count
+    // explicit forces additions or removals to be intentional.
     expect(Object.keys(TokenType).length).toBe(39);
   });
 
