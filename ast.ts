@@ -1450,6 +1450,9 @@ export function table(
   children: (TableCaption | TableRow)[],
   attributes?: string,
 ): Table {
+  // Optional fields stay omitted instead of being set to `undefined` so the
+  // serialized tree stays compact and debug output reflects what was actually
+  // present in source.
   return attributes !== undefined
     ? { type: 'table', attributes, children }
     : { type: 'table', children };
@@ -1485,6 +1488,8 @@ export function tableRow(
   children: TableCell[],
   attributes?: string,
 ): TableRow {
+  // Table rows use the same omission rule as tables: absent attributes should
+  // not become noisy `attributes: undefined` fields in snapshots or JSON.
   return attributes !== undefined
     ? { type: 'table-row', attributes, children }
     : { type: 'table-row', children };
@@ -1514,6 +1519,8 @@ export function tableCell(
   children: WikistNode[],
   attributes?: string,
 ): TableCell {
+  // Header/data status is structural and always explicit. Attributes are not,
+  // so we only materialize them when the source actually carried them.
   return attributes !== undefined
     ? { type: 'table-cell', header, attributes, children }
     : { type: 'table-cell', header, children };
@@ -1637,6 +1644,8 @@ export function imageLink(target: string, children: WikistNode[]): ImageLink {
  * ```
  */
 export function categoryLink(target: string, sort_key?: string): CategoryLink {
+  // Category links are often compared or serialized by tools, so leaving the
+  // optional sort key absent is cleaner than storing an explicit undefined.
   return sort_key !== undefined
     ? { type: 'category-link', target, sort_key }
     : { type: 'category-link', target };
@@ -1691,6 +1700,8 @@ export function templateArgument(
   children: WikistNode[],
   name?: string,
 ): TemplateArgument {
+  // Named and positional arguments share one node type. Omitting `name` is the
+  // signal that the argument was positional in source.
   return name !== undefined
     ? { type: 'template-argument', name, children }
     : { type: 'template-argument', children };
@@ -1799,6 +1810,8 @@ export function htmlTag(
   children: WikistNode[],
   attributes?: Readonly<Record<string, string>>,
 ): HtmlTag {
+  // Self-closing tags still use the same builder so callers can construct one
+  // consistent node shape and let `self_closing` carry the semantic difference.
   return attributes !== undefined
     ? { type: 'html-tag', tag_name, self_closing, attributes, children }
     : { type: 'html-tag', tag_name, self_closing, children };
@@ -1916,6 +1929,8 @@ export function signature(tildes: 3 | 4 | 5): Signature {
  * ```
  */
 export function lineBreak(): Break {
+  // `lineBreak` is the exported name because `break` would collide with the
+  // JavaScript keyword at call sites.
   return { type: 'break' };
 }
 
@@ -1934,6 +1949,9 @@ export function gallery(
   children: WikistNode[],
   attributes?: Readonly<Record<string, string>>,
 ): Gallery {
+  // Like htmlTag(), the gallery builder keeps optional attributes sparse so
+  // tooling sees the same shape whether the tree came from parsing or manual
+  // construction.
   return attributes !== undefined
     ? { type: 'gallery', attributes, children }
     : { type: 'gallery', children };
@@ -1964,6 +1982,9 @@ export function reference(
   name?: string,
   group?: string,
 ): Reference {
+  // References have two independent optional metadata fields. Building the node
+  // step by step keeps the runtime shape obvious and avoids attaching metadata
+  // that the caller did not actually provide.
   const node: Reference = { type: 'reference', children };
   if (name !== undefined) {
     return group !== undefined
