@@ -105,6 +105,7 @@ function zeroPos(pt: Point): Position {
 // column, so this tracker keeps that extra running state as tokens are consumed.
 
 interface LineTracker {
+  /** 1-based logical line number for the current token cursor. */
   line: number;
   /** Offset of the start of the current line. */
   line_offset: number;
@@ -130,12 +131,15 @@ function advanceLine(tracker: LineTracker, newlineEnd: number): void {
 // line-tracking state together so the parser can peek and consume cleanly.
 
 interface TokenBuffer {
+  /** Underlying token iterator from the tokenizer stage. */
   iter: Iterator<Token>;
+  /** Current token under the parser cursor, or `null` at the end. */
   current: Token | null;
   /** Tracks line/column from newline tokens. */
   tracker: LineTracker;
 }
 
+/** Create a token buffer whose cursor starts at the first token. */
 function createBuffer(tokens: Iterable<Token>): TokenBuffer {
   const iter = tokens[Symbol.iterator]();
   const first = iter.next();
@@ -326,6 +330,8 @@ function* parseHeading(
   }
 
   // Trim trailing close marker (HEADING_MARKER_CLOSE or EQUALS).
+  // This scan is intentionally end-biased so inner text like `a=b` survives as
+  // heading content instead of being mistaken for the closing marker.
   let endOffset = marker.end;
   if (
     lineTokens.length > 0 &&
@@ -456,6 +462,9 @@ function* parseParagraph(
 
   yield enterEvent('paragraph', {}, paraPos);
 
+  // Inline markup is deliberately left unresolved here. Paragraph parsing owns
+  // block boundaries; the later inline stage owns links, templates, emphasis,
+  // and other nested inline syntax.
   for (const ct of contentTokens) {
     const ctStart = pointAt(buf.tracker, ct.start);
     const ctEnd = pointAt(buf.tracker, ct.end);
@@ -488,6 +497,13 @@ function* parseList(
   // The open stack tracks which lists and items are currently open.
   // Each entry is { level: ListLevel, had_item: boolean }.
   const openStack: { level: ListLevel; marker_char: string }[] = [];
+
+  // Think of each list line as a prefix rewrite against the previous line:
+  //
+  // previous: * *
+  // current : * #
+  //            │ └─ depth 2 changed kind, so close to depth 1 then reopen
+  //            └── depth 1 stayed compatible and remains open
 
   // Process consecutive list lines.
   while (peek(buf) !== null) {
@@ -640,6 +656,7 @@ function* closeLevels(
   }
 }
 
+/** Convert a list marker token type back into the source marker character. */
 function tokenToMarkerChar(type: TokenType): string {
   switch (type) {
     case TokenType.BULLET: return '*';
@@ -695,6 +712,17 @@ function* parseTable(
 
   let rowOpen = false;
   let cellOpen = false;
+
+  // Tables are mostly driven one physical line at a time:
+  //
+  // {|    open table
+  // |+    caption
+  // |-    explicit row boundary
+  // |/!   cell line, with implicit row creation if needed
+  // |}    close table
+  //
+  // `rowOpen` and `cellOpen` let recovery close the right structure when the
+  // source omits an expected row separator or table terminator.
 
   // Process table body line by line until TABLE_CLOSE or EOF.
   while (peek(buf) !== null) {
@@ -798,6 +826,8 @@ function* parseTable(
         cellOpen = false;
       }
       if (!rowOpen) {
+        // The first cell line after `{|` implicitly starts a row even without
+        // an explicit `|-` line.
         const rowPt = pointAt(buf.tracker, t.start);
         yield enterEvent('table-row', {}, zeroPos(rowPt));
         rowOpen = true;
@@ -833,8 +863,8 @@ function* parseTable(
       continue;
     }
 
-    // Anything else inside the table: treat as continuation content.
-    // This handles malformed table content gracefully.
+    // Anything else inside the table is recovery territory. Advancing keeps the
+    // parser moving so malformed table content does not trap the loop.
     advance(buf);
   }
 
@@ -911,10 +941,12 @@ function* parseTableCells(
       : cellPt;
     yield exitEvent('table-cell', zeroPos(cellEndPt));
 
+    // `||` and `!!` mean there is another cell on the same physical line.
     if (!hitSeparator) break;
   }
 }
 
+/** Close a table cell at the current cursor position. */
 function* closeCell(buf: TokenBuffer): Generator<WikitextEvent> {
   const pt = peek(buf)
     ? pointAt(buf.tracker, peek(buf)!.start)
@@ -922,6 +954,7 @@ function* closeCell(buf: TokenBuffer): Generator<WikitextEvent> {
   yield exitEvent('table-cell', zeroPos(pt));
 }
 
+/** Close a table row at the current cursor position. */
 function* closeRow(buf: TokenBuffer): Generator<WikitextEvent> {
   const pt = peek(buf)
     ? pointAt(buf.tracker, peek(buf)!.start)
@@ -936,6 +969,8 @@ function* emitLineContent(
   while (peek(buf) !== null) {
     const t = peek(buf)!;
     if (t.type === TokenType.NEWLINE || t.type === TokenType.EOF) break;
+    // Used for simple single-line payloads such as captions where the block
+    // container is already known and only raw text needs to be forwarded.
     const tStart = pointAt(buf.tracker, t.start);
     const tEnd = pointAt(buf.tracker, t.end);
     yield textEvent(t.start, t.end, pos(tStart, tEnd));
@@ -992,6 +1027,8 @@ function* parsePreformatted(
     while (peek(buf) !== null) {
       const t = peek(buf)!;
       if (t.type === TokenType.NEWLINE || t.type === TokenType.EOF) break;
+      // The leading space is structural and already consumed, so the emitted
+      // text starts with the first token after that marker.
       const tStart = pointAt(buf.tracker, t.start);
       const tEnd = pointAt(buf.tracker, t.end);
       yield textEvent(t.start, t.end, pos(tStart, tEnd));
