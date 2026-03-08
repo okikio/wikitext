@@ -231,8 +231,8 @@ export function* inlineEvents(
 /**
  * Parse one merged run of adjacent block-parser text events.
  *
- * The block parser may emit several neighboring text events because it works at
- * token granularity. Inline constructs can span across those boundaries, so we
+ * The block parser may emit several neighboring text events for one logical
+ * inline region. Inline constructs can span across those boundaries, so we
  * first merge the run into one scan range and only then resolve inline syntax.
  */
 function* parseTextGroup(
@@ -581,7 +581,7 @@ function matchTemplate(
   for (let index = 0; index < separators.length; index++) {
     const arg_start = separators[index] + 1;
     const arg_end = index + 1 < separators.length ? separators[index + 1] : inner_end;
-    events.push(...parseTemplateArgument(ctx, arg_start, arg_end));
+    appendTemplateArgument(events, ctx, arg_start, arg_end);
   }
 
   events.push(exitEvent(node_type, outer_pos));
@@ -595,11 +595,12 @@ function matchTemplate(
  * as another inline range so nested links, templates, and entities still show
  * up inside argument payloads.
  */
-function parseTemplateArgument(
+function appendTemplateArgument(
+  events: WikitextEvent[],
   ctx: TextGroupContext,
   start_offset: number,
   end_offset: number,
-): WikitextEvent[] {
+): void {
   const arg_pos = createPosition(ctx, start_offset, end_offset);
   const eq = topLevelEquals(ctx.source, start_offset, end_offset);
   const props = eq === -1
@@ -611,11 +612,9 @@ function parseTemplateArgument(
     };
   const value_start = eq === -1 ? start_offset : eq + 1;
 
-  return [
-    enterEvent('template-argument', props, arg_pos),
-    ...collectInlineRange(ctx, value_start, end_offset, true),
-    exitEvent('template-argument', arg_pos),
-  ];
+  events.push(enterEvent('template-argument', props, arg_pos));
+  appendInlineRange(events, ctx, value_start, end_offset, true);
+  events.push(exitEvent('template-argument', arg_pos));
 }
 
 /**
@@ -678,7 +677,7 @@ function matchWikilink(
   const events: WikitextEvent[] = [enterEvent(node_type, { target }, outer_pos)];
 
   if (separators.length > 0) {
-    events.push(...collectInlineRange(ctx, separators[0] + 1, inner_end, false));
+    appendInlineRange(events, ctx, separators[0] + 1, inner_end, false);
   }
 
   events.push(exitEvent(node_type, outer_pos));
@@ -718,7 +717,7 @@ function matchExternalLink(
   }
 
   if (label_start < close) {
-    events.push(...collectInlineRange(ctx, label_start, close, false));
+    appendInlineRange(events, ctx, label_start, close, false);
   }
 
   events.push(exitEvent('external-link', outer_pos));
@@ -798,15 +797,18 @@ function matchDelimitedInline(
   const close_start = findApostropheClose(ctx.source, content_start, line_end, marker_length);
   const content_end = close_start === -1 ? line_end : close_start;
   const close_end = close_start === -1 ? line_end : close_start + marker_length;
-  const outer_pos = createPosition(ctx, cursor, close_end);
-
   return {
     end_offset: close_end,
-    events: [
-      enterEvent(node_type, {}, outer_pos),
-      ...collectInlineRange(ctx, content_start, content_end, true),
-      exitEvent(node_type, outer_pos),
-    ],
+    events: createWrappedInlineEvents(
+      ctx,
+      cursor,
+      close_end,
+      node_type,
+      {},
+      content_start,
+      content_end,
+      true,
+    ),
   };
 }
 
@@ -864,14 +866,18 @@ function matchTagLike(
 
     const close = findMatchingCloseTag(ctx.source, tag, tag.end_offset, end_offset);
     if (close === null) return null;
-    const outer_pos = createPosition(ctx, cursor, close.end_offset);
     return {
       end_offset: close.end_offset,
-      events: [
-        enterEvent('reference', ref_props, outer_pos),
-        ...collectInlineRange(ctx, tag.end_offset, close.start_offset, true),
-        exitEvent('reference', outer_pos),
-      ],
+      events: createWrappedInlineEvents(
+        ctx,
+        cursor,
+        close.end_offset,
+        'reference',
+        ref_props,
+        tag.end_offset,
+        close.start_offset,
+        true,
+      ),
     };
   }
 
@@ -888,14 +894,18 @@ function matchTagLike(
 
   const close = findMatchingCloseTag(ctx.source, tag, tag.end_offset, end_offset);
   if (close === null) return null;
-  const outer_pos = createPosition(ctx, cursor, close.end_offset);
   return {
     end_offset: close.end_offset,
-    events: [
-      enterEvent('html-tag', html_props, outer_pos),
-      ...collectInlineRange(ctx, tag.end_offset, close.start_offset, true),
-      exitEvent('html-tag', outer_pos),
-    ],
+    events: createWrappedInlineEvents(
+      ctx,
+      cursor,
+      close.end_offset,
+      'html-tag',
+      html_props,
+      tag.end_offset,
+      close.start_offset,
+      true,
+    ),
   };
 }
 
@@ -963,14 +973,35 @@ function wrapLeaf(
   return [enterEvent(node_type, props, position), exitEvent(node_type, position)];
 }
 
-/** Materialize a nested inline parse into an array for parent node assembly. */
-function collectInlineRange(
+/** Append a nested inline parse directly into an existing event array. */
+function appendInlineRange(
+  events: WikitextEvent[],
   ctx: TextGroupContext,
   start_offset: number,
   end_offset: number,
   allow_bare_url: boolean,
+): void {
+  for (const event of parseInlineRange(ctx, start_offset, end_offset, allow_bare_url)) {
+    events.push(event);
+  }
+}
+
+/** Create a wrapped inline node without extra temporary arrays from nested spreads. */
+function createWrappedInlineEvents(
+  ctx: TextGroupContext,
+  start_offset: number,
+  end_offset: number,
+  node_type: string,
+  props: Readonly<Record<string, unknown>>,
+  content_start: number,
+  content_end: number,
+  allow_bare_url: boolean,
 ): WikitextEvent[] {
-  return Array.from(parseInlineRange(ctx, start_offset, end_offset, allow_bare_url));
+  const position = createPosition(ctx, start_offset, end_offset);
+  const events: WikitextEvent[] = [enterEvent(node_type, props, position)];
+  appendInlineRange(events, ctx, content_start, content_end, allow_bare_url);
+  events.push(exitEvent(node_type, position));
+  return events;
 }
 
 /** Create a full `Position` object for one absolute source range. */
