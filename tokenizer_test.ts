@@ -29,7 +29,12 @@ function tokens(input: string): Token[] {
   return Array.from(tokenize(input));
 }
 
-/** Shorthand for the token type at index `i`. */
+/**
+ * Shorthand for the token type at index `i`.
+ *
+ * This keeps the assertions compact without hiding the token array the test is
+ * actually exercising.
+ */
 function typeAt(toks: Token[], i: number): string {
   return toks[i].type;
 }
