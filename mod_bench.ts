@@ -322,7 +322,6 @@ const LARGE_STREAMING_ARTICLE_TEXT = repeatToMinimumSize(
   `${LARGE_STREAMING_ARTICLE_UNIT}\n`,
   LARGE_FILE_MINIMUM_SIZE,
 );
-const ENABLE_100MB_BENCH = Deno.env.get('WIKITEXT_BENCH_100MB') === '1';
 
 /** Drain a generator, returning the token count to prevent dead-code elimination. */
 function drainTokenize(input: string): number {
@@ -563,20 +562,18 @@ summary(() => {
   }).gc('inner');
 });
 
-if (ENABLE_100MB_BENCH) {
-  summary(() => {
-    bench('tokenize: large mixed article (~100 MB)', () => {
-      do_not_optimize(drainTokenize(LARGE_STREAMING_ARTICLE_TEXT));
-    }).gc('inner');
+summary(() => {
+  bench('tokenize: large mixed article (~100 MB)', () => {
+    do_not_optimize(drainTokenize(LARGE_STREAMING_ARTICLE_TEXT));
+  }).gc('inner');
 
-    bench('blockEvents: large mixed article (~100 MB)', () => {
-      do_not_optimize(drainBlockEvents(LARGE_STREAMING_ARTICLE_TEXT));
-    }).gc('inner');
+  bench('blockEvents: large mixed article (~100 MB)', () => {
+    do_not_optimize(drainBlockEvents(LARGE_STREAMING_ARTICLE_TEXT));
+  }).gc('inner');
 
-    bench('inlineEvents: large mixed article (~100 MB)', () => {
-      do_not_optimize(drainInlineEvents(LARGE_STREAMING_ARTICLE_TEXT));
-    }).gc('inner');
-  });
-}
+  bench('inlineEvents: large mixed article (~100 MB)', () => {
+    do_not_optimize(drainInlineEvents(LARGE_STREAMING_ARTICLE_TEXT));
+  }).gc('inner');
+});
 
 await run();
