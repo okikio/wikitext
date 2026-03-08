@@ -7,15 +7,21 @@
  *
  * Output is written to ./npm/ and is gitignored. The directory is
  * cleared on each run so stale artifacts never bleed through.
+ *
+ * This script is intentionally explicit about packaging choices because npm
+ * publishing is a boundary where accidental config drift is expensive. The
+ * comments below explain why the build opts into, or out of, each dnt feature.
  */
-import { build, emptyDir } from "jsr:@deno/dnt";
-import denoJson from "../deno.json" with { type: "json" };
+import { build, emptyDir } from 'jsr:@deno/dnt';
+import denoJson from '../deno.json' with { type: 'json' };
 
-await emptyDir("./npm");
+// Start from a clean output directory so removed entry points or metadata do
+// not survive from a previous build and confuse package inspection.
+await emptyDir('./npm');
 
 await build({
-  entryPoints: ["./mod.ts"],
-  outDir: "./npm",
+  entryPoints: ['./mod.ts'],
+  outDir: './npm',
 
   // mod.ts uses no Deno-specific globals (no Deno.*, no std/ imports),
   // so no shims are required.
@@ -72,14 +78,16 @@ await build({
     // in April 2025; targeting 20+ keeps the engines field accurate and
     // prevents installation on unsupported runtimes.
     engines: {
-      node: ">=24",
+      node: '>=24',
     },
   },
 
   postBuild() {
-    // Copy the non-code files that should travel with the npm package.
-    Deno.copyFileSync("license", "npm/license");
-    Deno.copyFileSync("readme.md", "npm/readme.md");
-    Deno.copyFileSync("changelog.md", "npm/changelog.md");
+    // dnt only handles code and generated package metadata. The project docs
+    // and license still need to be copied explicitly so the npm tarball tells
+    // the same story as the source repository.
+    Deno.copyFileSync('license', 'npm/license');
+    Deno.copyFileSync('readme.md', 'npm/readme.md');
+    Deno.copyFileSync('changelog.md', 'npm/changelog.md');
   },
 });
