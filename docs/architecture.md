@@ -53,6 +53,12 @@ Each stage can also be used independently:
 - `events(input)` returns the full event stream (block + inline).
 - `parse(input)` is shorthand for `buildTree(events(input))`.
 
+Today, the lower-level pieces are the part that already exists in the codebase:
+`TextSource`, tokens, events, AST node types/builders/guards, `tokenize()`,
+`blockEvents()`, and `inlineEvents()`. The orchestration helpers listed above
+describe the intended top-level API shape, but some of them are still future
+work rather than shipped exports.
+
 
 ## Events as the interchange layer
 
@@ -82,6 +88,29 @@ Enter/exit pairs nest like parentheses. The event stream is always
 well-formed: every `enter(X)` has a matching `exit(X)`, with proper stack
 discipline. Consumers can rely on this for correct tree construction,
 streaming HTML emission, and event filtering.
+
+
+## Public export boundary
+
+The package aims to be utility-first, but not implementation-detail-first.
+
+That means these categories are deliberately public:
+
+- source abstractions such as `TextSource`
+- token, event, and AST interfaces
+- discriminated unions and category aliases used in downstream narrowing
+- builder functions and type guards
+- parser stage entry points such as `tokenize()`, `blockEvents()`, and `inlineEvents()`
+
+These categories are still intentionally internal:
+
+- parser-stage local context records
+- temporary matcher result objects
+- low-level scan helpers whose contracts are tuned for one implementation
+
+This split keeps the package practical for tool authors who want to build on
+top of the parser, while avoiding a large accidental API surface that would
+freeze internal recovery and performance machinery too early.
 
 
 ## Streaming modes
