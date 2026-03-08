@@ -25,24 +25,28 @@ function parse(input: string): WikitextEvent[] {
   return [...inlineEvents(input, blockEvents(input, tokenize(input)))];
 }
 
+/** Reduce the stream to enter/exit pairs so nesting assertions stay compact. */
 function structure(events: WikitextEvent[]): [string, string][] {
   return events
     .filter((event): event is EnterEvent | ExitEvent => event.kind === 'enter' || event.kind === 'exit')
     .map((event) => [event.kind, event.node_type]);
 }
 
+/** Find the first enter event for one node type. */
 function firstEnter(events: WikitextEvent[], nodeType: string): EnterEvent | undefined {
   return events.find(
     (event): event is EnterEvent => event.kind === 'enter' && event.node_type === nodeType,
   );
 }
 
+/** Assert that a given node type appears and return its opening event. */
 function expectEnter(events: WikitextEvent[], nodeType: string): EnterEvent {
   const event = firstEnter(events, nodeType);
   expect(event).toBeDefined();
   return event!;
 }
 
+/** Resolve text-event ranges back into source strings for content assertions. */
 function textValues(events: WikitextEvent[], source: string): string[] {
   return events
     .filter((event) => event.kind === 'text')
