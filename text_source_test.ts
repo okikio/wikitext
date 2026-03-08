@@ -179,6 +179,9 @@ describe('TextSource — custom implementation', () => {
       this.length = str.length;
     }
 
+    // These methods intentionally delegate straight to the backing string so
+    // the tests stay focused on interface conformance, not on inventing a new
+    // text model with subtly different semantics.
     charCodeAt(index: number): number {
       return this._str.charCodeAt(index);
     }
