@@ -52,17 +52,18 @@ Each stage can also be used independently:
 - `outlineEvents(input)` returns block-level events only (no inline parsing).
 - `events(input)` returns the full event stream (block + inline).
 - `parse(input)` is shorthand for `buildTree(events(input), { source: input })`.
-- `parseWithRecovery(input)` keeps the same tree plus an explicit recovery flag and diagnostics.
-- `parseWithDiagnostics(input)` keeps the same tree plus recovery diagnostics.
+- `parseWithDiagnostics(input)` keeps a more conservative tree plus recovery diagnostics.
+- `parseWithRecovery(input)` keeps the more aggressively recovered tree plus an explicit recovery flag and diagnostics.
 
 The extra `source` argument on `buildTree()` exists because the event stream is
 range-first. Text events carry offsets, not copied strings, so the tree
 builder needs the original source to materialize `Text.value`.
 
-This means the parser's tolerance and the caller's explicitness are separate
-choices. Recovery is always on so the parser can uphold its never-throw
-contract, but callers can still choose whether they want a plain recovered tree
-or a recovery-aware result shape.
+This means the parser's tolerance and the caller's result shape are separate
+choices. The parser still upholds its never-throw contract, but callers can
+choose whether they want only the forgiving recovered tree, a more
+conservative tree plus diagnostics, or the recovered tree plus diagnostics and
+an explicit recovery summary.
 
 Today, the lower-level pieces are the part that already exists in the codebase:
 `TextSource`, tokens, events, AST node types/builders/guards, `tokenize()`,
@@ -229,6 +230,10 @@ for callers that want random-access traversal.
 `buildTreeWithDiagnostics(events, { source })` runs the same materialization,
 but it also preserves recovery diagnostics that would otherwise disappear once
 the tree has been built.
+
+`buildTreeWithRecovery(events, { source })` adds one more summary field,
+`recovered`, for consumers that want to branch explicitly on whether any
+recovery happened while building the final tree.
 
 The conversion rule is intentionally mechanical:
 
