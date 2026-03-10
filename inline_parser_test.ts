@@ -19,6 +19,7 @@ import {
 import { tokenize } from './tokenizer.ts';
 import { blockEvents } from './block_parser.ts';
 import { inlineEvents } from './inline_parser.ts';
+import { textEvent } from './events.ts';
 import type { EnterEvent, ExitEvent, WikitextEvent } from './events.ts';
 
 function parse(input: string): WikitextEvent[] {
@@ -55,6 +56,56 @@ function textValues(events: WikitextEvent[], source: string): string[] {
       return source.slice(event.start_offset, event.end_offset);
     });
 }
+
+describe('inlineEvents — text-group boundaries', () => {
+  it('merges contiguous neighboring text events into one scan group', () => {
+    const source = 'Hello [[Mars|planet]] world';
+    const pos = {
+      start: { line: 1, column: 1, offset: 0 },
+      end: { line: 1, column: source.length + 1, offset: source.length },
+    } as const;
+
+    const events = Array.from(inlineEvents(source, [
+      textEvent(0, 6, {
+        start: pos.start,
+        end: { line: 1, column: 7, offset: 6 },
+      }),
+      textEvent(6, 21, {
+        start: { line: 1, column: 7, offset: 6 },
+        end: { line: 1, column: 22, offset: 21 },
+      }),
+      textEvent(21, source.length, {
+        start: { line: 1, column: 22, offset: 21 },
+        end: pos.end,
+      }),
+    ]));
+
+    expect(structure(events)).toContainEqual(['enter', 'wikilink']);
+    expect(structure(events)).toContainEqual(['exit', 'wikilink']);
+    expect(textValues(events, source)).toContain('Hello ');
+    expect(textValues(events, source)).toContain('planet');
+    expect(textValues(events, source)).toContain(' world');
+  });
+
+  it('keeps non-contiguous text events as separate groups', () => {
+    const source = 'Line one\nLine two';
+
+    // The block parser currently treats continuation newlines as structural,
+    // so inline receives one text event per line-local contiguous span.
+    const events = Array.from(inlineEvents(source, [
+      textEvent(0, 8, {
+        start: { line: 1, column: 1, offset: 0 },
+        end: { line: 1, column: 9, offset: 8 },
+      }),
+      textEvent(9, 17, {
+        start: { line: 2, column: 1, offset: 9 },
+        end: { line: 2, column: 9, offset: 17 },
+      }),
+    ]));
+
+    expect(textValues(events, source)).toEqual(['Line one', 'Line two']);
+  });
+});
 
 describe('inlineEvents — emphasis', () => {
   it('parses italic markup', () => {
