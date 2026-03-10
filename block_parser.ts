@@ -520,18 +520,27 @@ function* parseHeading(
 // one logical group, but that would be a new internal contract. It would no
 // longer be the same thing as one ordinary contiguous text span.
 
-/** The set of token types that start a new block (terminating a paragraph). */
-const BLOCK_START_TOKENS: ReadonlySet<string> = new Set([
-  TokenType.HEADING_MARKER,
-  TokenType.BULLET,
-  TokenType.HASH,
-  TokenType.SEMICOLON,
-  TokenType.COLON,
-  TokenType.TABLE_OPEN,
-  TokenType.TABLE_CLOSE,
-  TokenType.THEMATIC_BREAK,
-  TokenType.PREFORMATTED_MARKER,
-]);
+/**
+ * Lookup table for token types that start a new block and therefore terminate
+ * a running paragraph.
+ *
+ * This is a fixed string vocabulary, so a null-prototype object is a tighter
+ * fit than a `Set` for the hot membership check inside paragraph parsing.
+ */
+const BLOCK_START_TOKEN_LOOKUP: Partial<Record<TokenType, true>> = Object.assign(
+  Object.create(null),
+  {
+    [TokenType.HEADING_MARKER]: true,
+    [TokenType.BULLET]: true,
+    [TokenType.HASH]: true,
+    [TokenType.SEMICOLON]: true,
+    [TokenType.COLON]: true,
+    [TokenType.TABLE_OPEN]: true,
+    [TokenType.TABLE_CLOSE]: true,
+    [TokenType.THEMATIC_BREAK]: true,
+    [TokenType.PREFORMATTED_MARKER]: true,
+  },
+);
 
 function* parseParagraph(
   buf: TokenBuffer,
@@ -596,7 +605,7 @@ function* parseParagraph(
       if (next === null) break;
       if (next.type === TokenType.EOF) break;
       if (next.type === TokenType.NEWLINE) break;
-      if (BLOCK_START_TOKENS.has(next.type)) break;
+      if (Object.hasOwn(BLOCK_START_TOKEN_LOOKUP, next.type)) break;
 
       // Each physical line becomes its own merged text span.
       //
