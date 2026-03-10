@@ -11,22 +11,34 @@
  * Instead it emits the same event stream shape the future `events()` API and
  * tree builder will consume.
  *
- * Performance matters here. The block parser currently emits token-sized text
- * events, so this module first merges adjacent text spans before scanning them.
- * The scanner then works in absolute source offsets and uses `charCodeAt()`
- * directly. It only slices strings when a node actually needs a convenience
- * string field such as `target`, `name`, or `value`.
+ * Performance matters here. The block parser emits raw text spans without
+ * inline meaning attached, so this module first merges adjacent spans before
+ * scanning them. The scanner then works in absolute source offsets and uses
+ * `charCodeAt()` directly. It only slices strings when a node actually needs a
+ * convenience string field such as `target`, `name`, or `value`.
+ *
+ * A concrete example helps here. Suppose the block parser has already decided
+ * that this source belongs to one paragraph line:
+ *
+ * ```text
+ * Hello [[Mars|planet]] world
+ * ```
+ *
+ * It may hand the inline parser one merged text range covering that whole line.
+ * The inline parser then walks left to right inside that range, keeping plain
+ * text plain until it reaches `[[`, and only then emitting link structure.
  *
  * The high-level flow inside one merged text group looks like this:
  *
  * ```text
- * merged text range
- *   │
- *   ├─► scan from left to right
- *   │     ├─► no special opener here  → keep extending plain text
- *   │     └─► special opener found    → flush plain text, emit inline events
- *   │
- *   └─► emit trailing plain text
+ * merged text range: "Hello [[Mars|planet]] world"
+ *
+ *   plain text   opener         plain text
+ *   "Hello "     "[["           " world"
+ *       |          |                |
+ *       +-- emit text when opener appears
+ *                  +-- emit wikilink events for Mars|planet
+ *                                   +-- emit trailing text at end
  * ```
  *
  * That matters because most source bytes are still ordinary text. The parser
@@ -80,9 +92,12 @@ const CC_EQUALS = 0x3d;
 const CC_GT = 0x3e;
 const CC_OPEN_BRACKET = 0x5b;
 const CC_CLOSE_BRACKET = 0x5d;
+const CC_OPEN_BRACE = 0x7b;
+const CC_CLOSE_BRACE = 0x7d;
 const CC_UNDERSCORE = 0x5f;
 const CC_PIPE = 0x7c;
 const CC_TILDE = 0x7e;
+const CC_LOWER_H = 0x68;
 const CC_DOUBLE_QUOTE = 0x22;
 const CC_SINGLE_QUOTE = 0x27;
 
@@ -94,6 +109,11 @@ const CC_SINGLE_QUOTE = 0x27;
  * duplicating a long boolean expression inside `Uint8Array.from(...)`. The
  * table still exists because the hot path wants O(1) membership checks while
  * scanning very large plain-text ranges.
+ *
+ * Two of the starts are worth calling out because they are less obvious than
+ * `[` or `<`:
+ * - `h` is here so the scanner can notice bare `http://` and `https://` URLs
+ * - `{` is here so templates and triple-brace arguments stay on the fast path
  */
 function isInlineSpecialStart(code: number): boolean {
   switch (code) {
@@ -103,8 +123,8 @@ function isInlineSpecialStart(code: number): boolean {
     case CC_AMP:
     case CC_OPEN_BRACKET:
     case CC_APOSTROPHE:
-    case 0x68:
-    case 0x7b:
+    case CC_LOWER_H:
+    case CC_OPEN_BRACE:
       return true;
 
     default:
@@ -123,6 +143,21 @@ const INLINE_SPECIAL_START = Uint8Array.from({ length: 128 }, (_, code) =>
  * continuous inline region. This context stores the source range, the point
  * where that region began, and enough line-start information to rebuild precise
  * `Position` values on demand without storing a `Point` for every code unit.
+ *
+ * Example:
+ *
+ * ```text
+ * source:       "Hello\n[[Mars]]"
+ * offsets:       01234567890123
+ *                0    5 6      13
+ *
+ * merged group: [0, 14)
+ * start_point:  line 1, column 1, offset 0
+ * line_starts:  [0, 6]
+ * ```
+ *
+ * With that information, the parser can answer questions like "what point is
+ * offset 9?" without storing a full point object for offsets 0 through 14.
  */
 interface TextGroupContext {
   /** The original source text backing this inline scan. */
@@ -191,9 +226,10 @@ interface TagBoundary {
 /**
  * Enrich block-parser text spans with inline markup events.
  *
- * Consecutive text events are merged before scanning because the block parser
- * currently emits text one token at a time. Parsing each token in isolation
- * would miss multi-token constructs such as `[[link|text]]` and `{{template}}`.
+ * Consecutive text events are merged before scanning because callers may still
+ * hand this stage smaller neighboring spans, and inline constructs can cross
+ * those boundaries. Parsing each span in isolation would miss multi-span
+ * constructs such as `[[link|text]]` and `{{template}}`.
  */
 export function* inlineEvents(
   source: TextSource,
@@ -203,6 +239,12 @@ export function* inlineEvents(
 
   for (const event of events) {
     if (event.kind === 'text') {
+      // Today, one text group is only allowed to grow across contiguous source
+      // slices. Paragraph continuation lines therefore arrive as separate
+      // groups because the newline between them is structural and omitted from
+      // the text stream. A future discontiguous handoff experiment would change
+      // this exact check: it would keep the paragraph lines together in one
+      // logical group without pretending the omitted newline is plain text.
       if (
         pending_text.length > 0 &&
         pending_text[pending_text.length - 1].end_offset !== event.start_offset
@@ -234,6 +276,22 @@ export function* inlineEvents(
  * The block parser may emit several neighboring text events for one logical
  * inline region. Inline constructs can span across those boundaries, so we
  * first merge the run into one scan range and only then resolve inline syntax.
+ *
+ * Concrete example:
+ *
+ * ```text
+ * block stage hands us:
+ *   text("Hello ")
+ *   text("[[Mars|planet]]")
+ *   text(" world")
+ *
+ * inline stage treats that as one scan range:
+ *   "Hello [[Mars|planet]] world"
+ * ```
+ *
+ * That merge step matters because the link syntax crosses the smaller text
+ * event boundaries. Scanning each piece in isolation would miss the full
+ * `[[Mars|planet]]` construct.
  */
 function* parseTextGroup(
   source: TextSource,
@@ -241,6 +299,32 @@ function* parseTextGroup(
 ): Generator<WikitextEvent> {
   const first = events[0];
   const last = events[events.length - 1];
+
+  // Most merged text groups are still ordinary prose. When there is no inline
+  // opener anywhere in the group, preserve the merged text as-is and skip the
+  // extra work of building line-start tables and rescanning the whole range.
+  //
+  // Example safe fast path:
+  //
+  //   input range: "Just plain text here"
+  //   opener scan: finds no [[, {{, '', <, &, __, ~~~, or bare-url start
+  //   result: emit one plain text event and stop
+  //
+  // This is safe because the block parser has already decided the exact source
+  // range for the text group. If there is no possible inline opener inside
+  // that range, the inline stage would only rebuild the same text event with
+  // newly computed positions.
+  if (
+    findNextInlineSpecialStart(source, first.start_offset, last.end_offset) ===
+    last.end_offset
+  ) {
+    yield textEvent(first.start_offset, last.end_offset, {
+      start: first.position.start,
+      end: last.position.end,
+    });
+    return;
+  }
+
   const ctx = createTextGroupContext(
     source,
     first.start_offset,
@@ -257,15 +341,23 @@ function* parseTextGroup(
  * Plain text is emitted lazily only when a special construct is found or the
  * range ends.
  *
- * Read this as a left-to-right scan with deferred text emission:
+ * Read this as a left-to-right scan with deferred text emission. The parser
+ * does not emit `text("H")`, `text("He")`, `text("Hel")`, and so on while it
+ * walks plain prose. It remembers where the current plain run started, keeps
+ * scanning, and only emits that plain range when it must split around real
+ * inline syntax.
  *
  * ```text
- * cursor moves forward
- *   │
- *   ├─► match found    → flush [plain_start, cursor), emit match, jump to match end
- *   └─► no match       → keep scanning
+ * source: "Hello [[Mars]] world"
  *
- * after loop          → flush trailing plain text
+ * plain_start = 0
+ * cursor scans forward until it reaches the `[[` at offset 6
+ *
+ * flush text [0, 6)      -> "Hello "
+ * emit wikilink events   -> "[[Mars]]"
+ * resume at offset 14
+ *
+ * after loop flush trailing text [14, end) -> " world"
  * ```
  *
  * This shape keeps ordinary text cheap. We do not allocate a text event for
@@ -284,8 +376,12 @@ function* parseInlineRange(
   while (cursor < end_offset) {
     // Most bytes inside a merged text group are still ordinary text. Jumping
     // directly to the next possible opener avoids paying `matchSpecial()` on
-    // every character of long prose-heavy runs, which matters much more once
-    // inputs grow into multi-megabyte and 100 MB benchmark territory.
+    // every character of long prose-heavy runs.
+    //
+    // Example:
+    //   "The red planet is [[Mars]]."
+    //    ^^^^^^^^^^^^^^^^^^^ jump over this plain prose in one cheap scan
+    //                        ^ stop here because `[` could begin inline syntax
     cursor = findNextInlineSpecialStart(ctx.source, cursor, end_offset);
     if (cursor >= end_offset) break;
 
@@ -367,7 +463,7 @@ function matchSpecial(
     case CC_AMP:
       return matchHtmlEntity(ctx, cursor, end_offset);
 
-    case 0x7b:
+    case CC_OPEN_BRACE:
       return matchArgument(ctx, cursor, end_offset) ??
         matchTemplate(ctx, cursor, end_offset);
 
@@ -375,7 +471,7 @@ function matchSpecial(
       return matchWikilink(ctx, cursor, end_offset) ??
         matchExternalLink(ctx, cursor, end_offset);
 
-    case 0x68:
+    case CC_LOWER_H:
       return allow_bare_url ? matchBareUrl(ctx, cursor, end_offset) : null;
 
     case CC_APOSTROPHE:
@@ -915,6 +1011,25 @@ function matchTagLike(
  * A `Point` per code unit would be easy to use but too expensive for a hot
  * parser path. Integer line starts are enough to reconstruct positions on
  * demand.
+ *
+ * Concrete example:
+ *
+ * ```text
+ * source: "A\nBC\nDEF"
+ * offsets: 0 1 2 3 4 5 6 7
+ *
+ * line starts are:
+ *   [0, 2, 5]
+ *
+ * meaning:
+ *   line 1 starts at offset 0
+ *   line 2 starts at offset 2
+ *   line 3 starts at offset 5
+ * ```
+ *
+ * Later, if we need the point for offset 6, we only need to find the most
+ * recent line start at or before 6. That is enough to recover line 3,
+ * column 2, offset 6.
  */
 function createTextGroupContext(
   source: TextSource,
@@ -1022,6 +1137,17 @@ function createPosition(
  * This is a compromise between precision and allocation cost. We pay for a
  * binary search into line starts when we need a point, instead of storing a
  * full point table for every offset in the group.
+ *
+ * Example using line starts `[0, 6]` from the text `Hello\nMars`:
+ *
+ * ```text
+ * offset 2  -> line 1, column 3
+ * offset 8  -> line 2, column 3
+ * ```
+ *
+ * The first case stays on the original `start_point` line. The second case
+ * lands after the second recorded line start, so the line number increases and
+ * the column resets relative to that later boundary.
  */
 function pointAt(ctx: TextGroupContext, offset: number): Point {
   const line_index = lineIndexAt(ctx.line_starts, offset);
@@ -1128,25 +1254,25 @@ function topLevelSeparators(
   for (let cursor = start_offset; cursor < end_offset; cursor++) {
     const code = source.charCodeAt(cursor);
 
-    if (code === 0x7b && hasLiteral(source, cursor, end_offset, '{{{')) {
+    if (code === CC_OPEN_BRACE && hasLiteral(source, cursor, end_offset, '{{{')) {
       depth_argument++;
       cursor += 2;
       continue;
     }
 
-    if (code === 0x7d && hasLiteral(source, cursor, end_offset, '}}}')) {
+    if (code === CC_CLOSE_BRACE && hasLiteral(source, cursor, end_offset, '}}}')) {
       if (depth_argument > 0) depth_argument--;
       cursor += 2;
       continue;
     }
 
-    if (code === 0x7b && hasLiteral(source, cursor, end_offset, '{{')) {
+    if (code === CC_OPEN_BRACE && hasLiteral(source, cursor, end_offset, '{{')) {
       depth_template++;
       cursor += 1;
       continue;
     }
 
-    if (code === 0x7d && hasLiteral(source, cursor, end_offset, '}}')) {
+    if (code === CC_CLOSE_BRACE && hasLiteral(source, cursor, end_offset, '}}')) {
       if (depth_template > 0) depth_template--;
       cursor += 1;
       continue;
@@ -1195,25 +1321,25 @@ function firstTopLevelSeparator(
   for (let cursor = start_offset; cursor < end_offset; cursor++) {
     const code = source.charCodeAt(cursor);
 
-    if (code === 0x7b && hasLiteral(source, cursor, end_offset, '{{{')) {
+    if (code === CC_OPEN_BRACE && hasLiteral(source, cursor, end_offset, '{{{')) {
       depth_argument++;
       cursor += 2;
       continue;
     }
 
-    if (code === 0x7d && hasLiteral(source, cursor, end_offset, '}}}')) {
+    if (code === CC_CLOSE_BRACE && hasLiteral(source, cursor, end_offset, '}}}')) {
       if (depth_argument > 0) depth_argument--;
       cursor += 2;
       continue;
     }
 
-    if (code === 0x7b && hasLiteral(source, cursor, end_offset, '{{')) {
+    if (code === CC_OPEN_BRACE && hasLiteral(source, cursor, end_offset, '{{')) {
       depth_template++;
       cursor += 1;
       continue;
     }
 
-    if (code === 0x7d && hasLiteral(source, cursor, end_offset, '}}')) {
+    if (code === CC_CLOSE_BRACE && hasLiteral(source, cursor, end_offset, '}}')) {
       if (depth_template > 0) depth_template--;
       cursor += 1;
       continue;
