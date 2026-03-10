@@ -173,6 +173,18 @@ describe('blockEvents — paragraphs', () => {
     ]);
   });
 
+  it('splits paragraph text ranges at continuation newlines', () => {
+    const input = 'Line one\nLine two';
+    const events = parse(input);
+
+    // A continued paragraph stays one block node, but its newline is currently
+    // structural rather than emitted text. That means the block-to-inline
+    // handoff uses two contiguous line-local text ranges instead of one
+    // synthetic cross-newline range.
+
+    expect(textContent(events, input)).toEqual(['Line one', 'Line two']);
+  });
+
   it('ends paragraph at blank line', () => {
     const input = 'Para one\n\nPara two';
     const events = parse(input);
@@ -195,6 +207,13 @@ describe('blockEvents — paragraphs', () => {
       ['exit', 'heading'],
       ['exit', 'root'],
     ]);
+  });
+
+  it('preserves trailing spaces inside paragraph text ranges', () => {
+    const input = 'Hello world  ';
+    const events = parse(input);
+
+    expect(textContent(events, input)).toEqual(['Hello world  ']);
   });
 
   it('does not emit empty paragraph for blank input', () => {
@@ -255,6 +274,13 @@ describe('blockEvents — bullet lists', () => {
     const input = '* Hello';
     const events = parse(input);
     expect(textContent(events, input).join('')).toContain('Hello');
+  });
+
+  it('preserves trailing spaces inside list item text ranges', () => {
+    const input = '* Hello  ';
+    const events = parse(input);
+
+    expect(textContent(events, input)).toEqual([' Hello  ']);
   });
 });
 
@@ -394,6 +420,14 @@ describe('blockEvents — tables', () => {
     expect(struct).toContainEqual(['exit', 'table-caption']);
   });
 
+  it('preserves trailing spaces in table cell and caption text', () => {
+    const input = '{|\n|+ My caption  \n| Cell  \n|}';
+    const events = parse(input);
+
+    expect(textContent(events, input)).toContain(' My caption  ');
+    expect(textContent(events, input)).toContain('Cell  ');
+  });
+
   it('recovers from unclosed table', () => {
     const input = '{|\n| Cell';
     const events = parse(input);
@@ -450,6 +484,13 @@ describe('blockEvents — preformatted blocks', () => {
 
     expect(struct).toContainEqual(['enter', 'preformatted']);
     expect(struct).toContainEqual(['exit', 'preformatted']);
+  });
+
+  it('preserves trailing spaces in preformatted content', () => {
+    const input = ' code line  ';
+    const events = parse(input);
+
+    expect(textContent(events, input)).toEqual(['code line  ']);
   });
 
   it('merges consecutive preformatted lines', () => {
@@ -574,6 +615,25 @@ describe('blockEvents — property-based', () => {
         }
       }),
       { numRuns: 200 },
+    );
+  });
+
+  it('text event positions stay aligned with their source offsets', () => {
+    fc.assert(
+      fc.property(fc.string(), (s) => {
+        const events = parse(s);
+
+        for (const event of events) {
+          if (event.kind !== 'text') continue;
+
+          expect(event.start_offset).toBeGreaterThanOrEqual(0);
+          expect(event.end_offset).toBeGreaterThanOrEqual(event.start_offset);
+          expect(event.end_offset).toBeLessThanOrEqual(s.length);
+          expect(event.position.start.offset).toBe(event.start_offset);
+          expect(event.position.end.offset).toBe(event.end_offset);
+        }
+      }),
+      { numRuns: 300 },
     );
   });
 
