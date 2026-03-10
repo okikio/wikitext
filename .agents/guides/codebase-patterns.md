@@ -188,6 +188,9 @@ stack for nesting.
 **HTML tags:**
 - Self-closing, void elements, matching open/close pairs
 - Extension tags (`<ref>`, `<nowiki>`, `<pre>`, etc.): content protected
+- Tag recovery boundary is the opener's closing `>`:
+  malformed-but-closed openers stay structurally real, but an opener that
+  never reaches `>` stays plain text with an inline recovery diagnostic
 
 **Special constructs:**
 - `~~~`/`~~~~`/`~~~~~` → Signature
