@@ -195,6 +195,87 @@ interface ListLevel {
   ordered: boolean;
 }
 
+/**
+ * One merged text range that still maps exactly back to the original source.
+ *
+ * The block parser sees many small tokenizer tokens such as whitespace, text,
+ * punctuation, and delimiter leftovers. The later inline parser does not care
+ * about those original token boundaries. It cares about a simpler question:
+ * which exact source bytes belong to this block-level text run?
+ *
+ * `TextSpan` is the answer to that question. Each span records one contiguous
+ * `[start, end)` slice of source that the block parser has decided belongs to
+ * the current heading, paragraph line, list item line, table cell, or
+ * preformatted line.
+ *
+ * A concrete example is easier than the earlier placeholder A/B/gap diagram.
+ * Suppose the source content we want to keep is the line `alpha beta`, and the
+ * tokenizer handed this parser three adjacent content tokens:
+ *
+ *     [0,5)  = 'alpha'
+ *     [5,6)  = ' '
+ *     [6,10) = 'beta'
+ *
+ * Those three tokens become one span because each token starts exactly where
+ * the previous token ended:
+ *
+ *     pending span: [0,10)
+ *
+ * Now compare that with a case where a structural boundary appears in the
+ * middle. If a paragraph continues on the next physical line, the newline is a
+ * real block-parser boundary, so we do not merge across it:
+ *
+ *     source:  alpha beta\nsecond line
+ *              012345678901234567890
+ *                        ^ newline at offset 10
+ *
+ *     spans:   [0,10)  and  [11,22)
+ *
+ * Read that as: merge adjacent content bytes, but stop as soon as a newline,
+ * cell separator, or real gap means the bytes no longer belong to one local
+ * text run.
+ *
+ * The important invariant is source fidelity. A span may merge neighboring
+ * tokens, but it must never invent bytes, skip bytes that belong to content,
+ * or cross a structural boundary such as a newline or an inline cell
+ * separator.
+ */
+interface TextSpan {
+  /** Inclusive start offset of a merged text range. */
+  start: number;
+  /** Exclusive end offset of a merged text range. */
+  end: number;
+}
+
+/**
+ * Record one merged text range without allocating per-call closure state.
+ *
+ * The earlier perf pass used local `flushSpan()` helpers inside several hot
+ * block parsers. Those helpers were small, but they still created one closure
+ * per parser invocation. This shared helper keeps the same merge behavior while
+ * avoiding that repeated setup work.
+ *
+ * Correctness rule: this helper only merges contiguous token ranges. It does
+ * not trim trailing whitespace. Outside headings, trailing spaces are part of
+ * the original source range and must remain visible to downstream consumers.
+ *
+ * The sentinel values `spanStart = -1` and `spanEnd = -1` mean "there is no
+ * pending span right now." Callers build a pending span as they walk tokens,
+ * then call `pushTextSpan()` only when they hit one of three events:
+ *
+ * 1. a real gap in offsets
+ * 2. a structural boundary such as newline or cell separator
+ * 3. the end of the current block-local collection loop
+ */
+function pushTextSpan(
+  spans: TextSpan[],
+  start: number,
+  end: number,
+): void {
+  if (start === -1) return;
+  spans.push({ start, end });
+}
+
 function markerToLevel(marker: string): ListLevel {
   switch (marker) {
     case '*': return { kind: 'bullet', list_type: 'list', ordered: false };
@@ -375,12 +456,12 @@ function* parseHeading(
   // The inline parser only cares about source ranges, not original tokenizer
   // token boundaries. Merging contiguous spans here avoids re-merging the same
   // text immediately in the next stage.
-  yield* emitMergedTextEvents(
-    buf.tracker,
-    lineTokens,
-    contentStartIndex,
-    contentEndIndex,
-  );
+  if (contentStartIndex < contentEndIndex) {
+    yield* emitTextSpans(buf.tracker, [{
+      start: lineTokens[contentStartIndex].start,
+      end: lineTokens[contentEndIndex - 1].end,
+    }]);
+  }
 
   yield exitEvent('heading', headingPos);
 }
@@ -392,6 +473,52 @@ function* parseHeading(
 // A paragraph is a sequence of lines that don't start with a block
 // delimiter. The paragraph ends at a blank line (two consecutive
 // newlines), a block-starting token, or EOF.
+//
+// The comment that matters here is: a paragraph can span many physical lines,
+// but this block parser still splits its text spans at each newline.
+//
+// Concrete example:
+//
+//   source:
+//     Alpha beta
+//     Gamma delta
+//
+//   paragraph node:
+//     one paragraph containing both lines
+//
+//   emitted text spans:
+//     [Alpha beta]   then   [Gamma delta]
+//
+// Diagram:
+//
+//   paragraph
+//     |
+//     +-- line 1 content span
+//     +-- newline boundary
+//     +-- line 2 content span
+//
+// Why not merge the whole paragraph into one giant span? The important rule is
+// more precise than "paragraphs are line-based".
+//
+// Today, one `text` event means one contiguous source slice. A continued
+// paragraph line break sits between those slices as a real newline byte, and
+// this block stage treats that newline as paragraph structure rather than as
+// emitted text. So the current handoff is:
+//
+//   enter(paragraph)
+//     text("Alpha beta")
+//     text("Gamma delta")
+//   exit(paragraph)
+//
+// not:
+//
+//   enter(paragraph)
+//     text("Alpha beta\nGamma delta")
+//   exit(paragraph)
+//
+// A future discontiguous block-to-inline handoff could keep both line slices in
+// one logical group, but that would be a new internal contract. It would no
+// longer be the same thing as one ordinary contiguous text span.
 
 /** The set of token types that start a new block (terminating a paragraph). */
 const BLOCK_START_TOKENS: ReadonlySet<string> = new Set([
@@ -413,9 +540,40 @@ function* parseParagraph(
   const firstTok = peek(buf)!;
   const startPt = pointAt(buf.tracker, firstTok.start);
 
-  const contentTokens: Token[] = [];
+  const contentSpans: TextSpan[] = [];
+  let spanStart = -1;
+  let spanEnd = -1;
   let _endOffset = firstTok.start;
   let sawNewline = false;
+
+  // Walkthrough for the three span variables used below:
+  //
+  //   spanStart = where the current pending span begins
+  //   spanEnd   = where the current pending span currently ends
+  //   contentSpans = finished spans we already decided to keep
+  //
+  // Sentinel state:
+  //
+  //   spanStart = -1
+  //   spanEnd   = -1
+  //
+  // means "we are not currently building a span."
+  //
+  // Example with concrete offsets:
+  //
+  //   source line:  alpha beta
+  //                 0123456789
+  //
+  //   tokens seen:  [0,5) 'alpha'
+  //                 [5,6) ' '
+  //                 [6,10) 'beta'
+  //
+  //   state change:
+  //     start with no pending span
+  //     read [0,5)   -> pending becomes [0,5)
+  //     read [5,6)   -> still adjacent, extend to [0,6)
+  //     read [6,10)  -> still adjacent, extend to [0,10)
+  //     end of line  -> flush [0,10) into contentSpans
 
   while (peek(buf) !== null) {
     const t = peek(buf)!;
@@ -440,6 +598,21 @@ function* parseParagraph(
       if (next.type === TokenType.NEWLINE) break;
       if (BLOCK_START_TOKENS.has(next.type)) break;
 
+      // Each physical line becomes its own merged text span.
+      //
+      // Example:
+      //   source:  Alpha beta\nGamma
+      //   before newline: pending span is [Alpha beta]
+      //   newline found:  flush that span, then restart on the next line
+      //
+      // So the paragraph keeps going, but the current line-local span does not.
+      // The reason is not that the next line is outside the paragraph. The
+      // reason is that one current span must stay contiguous in source, while
+      // the continuation newline remains structural instead of becoming text.
+      pushTextSpan(contentSpans, spanStart, spanEnd);
+      spanStart = -1;
+      spanEnd = -1;
+
       // The newline is part of the paragraph content (continuation line).
       // We don't emit newline tokens as text — they're structural separators
       // within the paragraph's inline content.
@@ -447,24 +620,30 @@ function* parseParagraph(
     }
 
     sawNewline = false;
-    contentTokens.push(t);
+    if (spanStart === -1) {
+      spanStart = t.start;
+      spanEnd = t.end;
+    } else if (t.start === spanEnd) {
+      spanEnd = t.end;
+    } else {
+      pushTextSpan(contentSpans, spanStart, spanEnd);
+      spanStart = t.start;
+      spanEnd = t.end;
+    }
+
     _endOffset = t.end;
     advance(buf);
   }
 
-  // Trim trailing whitespace from content tokens.
-  while (
-    contentTokens.length > 0 &&
-    contentTokens[contentTokens.length - 1].type === TokenType.WHITESPACE
-  ) {
-    contentTokens.pop();
-  }
+  // The loop keeps one pending span in local variables for the common fast
+  // path. Flush it once at the end so the caller sees the final line segment
+  // even when the paragraph ended because of EOF or a block-start token.
+  pushTextSpan(contentSpans, spanStart, spanEnd);
 
   // Don't emit empty paragraphs.
-  if (contentTokens.length === 0) return;
+  if (contentSpans.length === 0) return;
 
-  const lastTok = contentTokens[contentTokens.length - 1];
-  const endPt = pointAt(buf.tracker, lastTok.end);
+  const endPt = pointAt(buf.tracker, contentSpans[contentSpans.length - 1].end);
   const paraPos = pos(startPt, endPt);
 
   yield enterEvent('paragraph', {}, paraPos);
@@ -472,7 +651,16 @@ function* parseParagraph(
   // Inline markup is deliberately left unresolved here. Paragraph parsing owns
   // block boundaries; the later inline stage owns links, templates, emphasis,
   // and other nested inline syntax.
-  yield* emitMergedTextEvents(buf.tracker, contentTokens, 0, contentTokens.length);
+  //
+  // Performance rule: emit one text event per contiguous span instead of one
+  // per tokenizer token. The inline parser only needs accurate source ranges,
+  // so coarser text events avoid redundant merge work in the next stage.
+  //
+  // That still leaves one event per physical paragraph line today, because the
+  // newline between continuation lines is structural rather than emitted text.
+  // Crossing that boundary with one logical group would require a different
+  // internal handoff shape than plain contiguous `text(start_offset, end_offset)`.
+  yield* emitTextSpans(buf.tracker, contentSpans);
 
   yield exitEvent('paragraph', paraPos);
 }
@@ -484,6 +672,10 @@ function* parseParagraph(
 // Wikitext lists are line-oriented. Each list line starts with one or more
 // marker characters (*#;:). The number and type of markers determines the
 // nesting structure.
+//
+// Once the marker prefix has been consumed, list item text uses the same span
+// model as paragraph text, just on a smaller scope: one physical list line.
+// The markers and the optional space after them are structure, not content.
 //
 // Example:
 //   * A       → list(ordered=false) > list-item(marker='*')
@@ -596,18 +788,47 @@ function* parseList(
     }
 
     // Collect inline content until newline or EOF.
-    const contentTokens: Token[] = [];
+    const contentSpans: TextSpan[] = [];
+    let spanStart = -1;
+    let spanEnd = -1;
     let lineEndOffset = markersEndOffset;
+
+    // This loop is the paragraph span algorithm applied to one list line.
+    // The only practical difference is the stop condition: list item content
+    // ends at the next newline instead of continuing across later lines.
 
     while (peek(buf) !== null) {
       const ct = peek(buf)!;
       if (ct.type === TokenType.NEWLINE || ct.type === TokenType.EOF) break;
-      contentTokens.push(ct);
+      if (spanStart === -1) {
+        spanStart = ct.start;
+        spanEnd = ct.end;
+      } else if (ct.start === spanEnd) {
+        spanEnd = ct.end;
+      } else {
+        pushTextSpan(contentSpans, spanStart, spanEnd);
+        spanStart = ct.start;
+        spanEnd = ct.end;
+      }
+
       lineEndOffset = ct.end;
       advance(buf);
     }
 
-    yield* emitMergedTextEvents(buf.tracker, contentTokens, 0, contentTokens.length);
+    // List item content follows the same rule as paragraphs: merge contiguous
+    // source ranges, but preserve exact source bytes inside those ranges.
+    //
+    // Concrete example:
+    //
+    //   source:  * item text here
+    //            ^ structural marker
+    //              ^^^^^^^^^^^^^^ content span that gets emitted
+    //
+    // The marker and the space after it help define list structure, so they do
+    // not become part of the emitted text span.
+    pushTextSpan(contentSpans, spanStart, spanEnd);
+
+    yield* emitTextSpans(buf.tracker, contentSpans);
 
     const itemEndPt = pointAt(buf.tracker, lineEndOffset);
 
@@ -905,13 +1126,35 @@ function* parseTableCells(
     }
 
     // Collect cell content until separator, newline, or EOF.
-    const contentTokens: Token[] = [];
+    const contentSpans: TextSpan[] = [];
+    let spanStart = -1;
+    let spanEnd = -1;
     let hitSeparator = false;
+
+    // Table cell spans use the same pending-span state as paragraphs and list
+    // items, but with one extra boundary: `||` or `!!` must split cells even
+    // when the bytes on both sides are adjacent in the original source.
+    //
+    // Concrete example:
+    //
+    //   source:  | A || B
+    //              ^^^^ first cell content
+    //                  ^^ separator
+    //                     ^^ second cell content
+    //
+    // The separator is structure, not content, so we flush the first cell span
+    // before consuming `||` and then start a fresh span for `B`.
 
     while (peek(buf) !== null) {
       const ct = peek(buf)!;
       if (ct.type === TokenType.NEWLINE || ct.type === TokenType.EOF) break;
       if (ct.type === separator) {
+        // Inline separators like `||` and `!!` are real structure boundaries.
+        // Flush the current merged span before consuming the separator so the
+        // cell content range stays faithful to the original source.
+        pushTextSpan(contentSpans, spanStart, spanEnd);
+        spanStart = -1;
+        spanEnd = -1;
         hitSeparator = true;
         advance(buf);
         break;
@@ -919,18 +1162,33 @@ function* parseTableCells(
       // Also handle `!!` as separator in header context when seeing DOUBLE_BANG
       // even from a data cell start (mixed usage).
       if (header && ct.type === TokenType.DOUBLE_BANG) {
+        pushTextSpan(contentSpans, spanStart, spanEnd);
+        spanStart = -1;
+        spanEnd = -1;
         hitSeparator = true;
         advance(buf);
         break;
       }
-      contentTokens.push(ct);
+      if (spanStart === -1) {
+        spanStart = ct.start;
+        spanEnd = ct.end;
+      } else if (ct.start === spanEnd) {
+        spanEnd = ct.end;
+      } else {
+        pushTextSpan(contentSpans, spanStart, spanEnd);
+        spanStart = ct.start;
+        spanEnd = ct.end;
+      }
+
       advance(buf);
     }
 
-    yield* emitMergedTextEvents(buf.tracker, contentTokens, 0, contentTokens.length);
+    pushTextSpan(contentSpans, spanStart, spanEnd);
 
-    const cellEndPt = contentTokens.length > 0
-      ? pointAt(buf.tracker, contentTokens[contentTokens.length - 1].end)
+    yield* emitTextSpans(buf.tracker, contentSpans);
+
+    const cellEndPt = contentSpans.length > 0
+      ? pointAt(buf.tracker, contentSpans[contentSpans.length - 1].end)
       : cellPt;
     yield exitEvent('table-cell', zeroPos(cellEndPt));
 
@@ -959,50 +1217,73 @@ function* closeRow(buf: TokenBuffer): Generator<WikitextEvent> {
 function* emitLineContent(
   buf: TokenBuffer,
 ): Generator<WikitextEvent> {
-  const lineTokens: Token[] = [];
+  const lineSpans: TextSpan[] = [];
+  let spanStart = -1;
+  let spanEnd = -1;
 
   while (peek(buf) !== null) {
     const t = peek(buf)!;
     if (t.type === TokenType.NEWLINE || t.type === TokenType.EOF) break;
     // Used for simple single-line payloads such as captions where the block
     // container is already known and only raw text needs to be forwarded.
-    lineTokens.push(t);
+    if (spanStart === -1) {
+      spanStart = t.start;
+      spanEnd = t.end;
+    } else if (t.start === spanEnd) {
+      spanEnd = t.end;
+    } else {
+      pushTextSpan(lineSpans, spanStart, spanEnd);
+      spanStart = t.start;
+      spanEnd = t.end;
+    }
+
     advance(buf);
   }
 
-  yield* emitMergedTextEvents(buf.tracker, lineTokens, 0, lineTokens.length);
+  // Captions and similar single-line payloads do not need token granularity.
+  // One merged range is enough unless a real gap appears in the underlying
+  // tokens.
+  //
+  // Example:
+  //   |+ caption text
+  //      ^^^^^^^^^^^^ one merged line-local span
+  //
+  // This helper exists so caption handling can reuse the same span model as
+  // other block text paths without duplicating the state machine again.
+  pushTextSpan(lineSpans, spanStart, spanEnd);
+  yield* emitTextSpans(buf.tracker, lineSpans);
 }
 
-/** Emit merged text events for contiguous token spans inside one line. */
-function* emitMergedTextEvents(
+/**
+ * Emit already-merged text spans as text events.
+ *
+ * The important invariant is simple: these spans must still cover the exact
+ * bytes the block parser decided belong to the block. This helper is only an
+ * event materialization step. It must not normalize spacing, trim content, or
+ * reinterpret structure.
+ *
+ * Every span passed here is expected to be line-local. That is why one current
+ * `LineTracker` state is enough to reconstruct both points for the event.
+ * Callers split on newlines earlier, then `emitTextSpans()` converts each
+ * finished `[start, end)` range into a proper `text` event.
+ *
+ * Example:
+ *
+ *     spans from caller: [12,20) and [24,31)
+ *     emitted events:    text(12,20) and text(24,31)
+ *
+ * This helper does not decide where spans begin or end. It only turns already
+ * approved spans into event objects with correct positions.
+ */
+function* emitTextSpans(
   tracker: LineTracker,
-  tokens: readonly Token[],
-  startIndex: number,
-  endIndex: number,
+  spans: readonly TextSpan[],
 ): Generator<WikitextEvent> {
-  if (startIndex >= endIndex) return;
-
-  let start = tokens[startIndex].start;
-  let end = tokens[startIndex].end;
-
-  for (let index = startIndex + 1; index < endIndex; index++) {
-    const token = tokens[index];
-    if (token.start === end) {
-      end = token.end;
-      continue;
-    }
-
-    const eventStart = pointAt(tracker, start);
-    const eventEnd = pointAt(tracker, end);
-    yield textEvent(start, end, pos(eventStart, eventEnd));
-
-    start = token.start;
-    end = token.end;
+  for (const span of spans) {
+    const eventStart = pointAt(tracker, span.start);
+    const eventEnd = pointAt(tracker, span.end);
+    yield textEvent(span.start, span.end, pos(eventStart, eventEnd));
   }
-
-  const eventStart = pointAt(tracker, start);
-  const eventEnd = pointAt(tracker, end);
-  yield textEvent(start, end, pos(eventStart, eventEnd));
 }
 
 /** Concatenate text of tokens by slicing from the source. */
@@ -1035,6 +1316,11 @@ function* parseThematicBreak(
 //
 // Lines starting with a space are preformatted (rendered as <pre>).
 // Consecutive preformatted lines form one preformatted block.
+//
+// This is the strictest source-fidelity path in the block parser. After the
+// leading structural marker space, the rest of each line is treated as literal
+// content. That means the span collector must preserve trailing spaces instead
+// of trimming or normalizing them.
 
 function* parsePreformatted(
   buf: TokenBuffer,
@@ -1051,17 +1337,42 @@ function* parsePreformatted(
     advance(buf);
 
     // Emit content of this line.
-    const lineTokens: Token[] = [];
+    const lineSpans: TextSpan[] = [];
+    let spanStart = -1;
+    let spanEnd = -1;
+
+    // Read this as: skip the one structural marker byte, then preserve every
+    // remaining byte on the line exactly as authored.
+    //
+    // Example:
+    //   source:  " pre  text  "
+    //             ^ structural marker, not emitted
+    //              ^^^^^^^^^^^ literal content, including trailing spaces
+
     while (peek(buf) !== null) {
       const t = peek(buf)!;
       if (t.type === TokenType.NEWLINE || t.type === TokenType.EOF) break;
       // The leading space is structural and already consumed, so the emitted
       // text starts with the first token after that marker.
-      lineTokens.push(t);
+      if (spanStart === -1) {
+        spanStart = t.start;
+        spanEnd = t.end;
+      } else if (t.start === spanEnd) {
+        spanEnd = t.end;
+      } else {
+        pushTextSpan(lineSpans, spanStart, spanEnd);
+        spanStart = t.start;
+        spanEnd = t.end;
+      }
+
       advance(buf);
     }
 
-    yield* emitMergedTextEvents(buf.tracker, lineTokens, 0, lineTokens.length);
+    // Preformatted content is the strictest source-fidelity case in this file.
+    // After the leading marker space, every remaining byte on the line counts
+    // as user content, including trailing spaces.
+    pushTextSpan(lineSpans, spanStart, spanEnd);
+    yield* emitTextSpans(buf.tracker, lineSpans);
 
     // Consume newline.
     if (peek(buf) !== null && peek(buf)!.type === TokenType.NEWLINE) {
