@@ -51,7 +51,18 @@ Each stage can also be used independently:
 - `tokens(input)` returns the raw token stream (cheapest path).
 - `outlineEvents(input)` returns block-level events only (no inline parsing).
 - `events(input)` returns the full event stream (block + inline).
-- `parse(input)` is shorthand for `buildTree(events(input))`.
+- `parse(input)` is shorthand for `buildTree(events(input), { source: input })`.
+- `parseWithRecovery(input)` keeps the same tree plus an explicit recovery flag and diagnostics.
+- `parseWithDiagnostics(input)` keeps the same tree plus recovery diagnostics.
+
+The extra `source` argument on `buildTree()` exists because the event stream is
+range-first. Text events carry offsets, not copied strings, so the tree
+builder needs the original source to materialize `Text.value`.
+
+This means the parser's tolerance and the caller's explicitness are separate
+choices. Recovery is always on so the parser can uphold its never-throw
+contract, but callers can still choose whether they want a plain recovered tree
+or a recovery-aware result shape.
 
 Today, the lower-level pieces are the part that already exists in the codebase:
 `TextSource`, tokens, events, AST node types/builders/guards, `tokenize()`,
@@ -181,6 +192,144 @@ The tokenizer calls `source.charCodeAt(i)` in its hot loop, so the backing
 store must make that operation cheap. For ropes, a cursor-based iterator that
 amortizes node traversal works well.
 
+## Fixed-vocabulary lookups
+
+Some parser decisions are true control-flow dispatch, so they stay as normal
+`switch` statements. Other checks are simpler: the code only needs to answer
+"is this one of our known markers?" or "what predeclared value does this token
+type map to?"
+
+Those fixed-vocabulary cases now prefer null-prototype object lookups in a few
+hot spots. That is a performance optimization, not a semantic requirement.
+
+```text
+normal object lookup
+  own key?                yes -> match
+  no -> walk prototype chain -> inherited key may exist
+
+null-prototype lookup
+  own key?                yes -> match
+  no -> stop
+```
+
+`Object.create(null)` removes inherited keys such as `toString` and
+`constructor`, so the table behaves more like a bare dictionary. Then
+`Object.hasOwn(table, key)` makes the intent explicit: only entries declared in
+that table count. This works well for fixed token-type and marker vocabularies
+where the parser wants cheap repeated membership or value-map checks without
+building dynamic collections.
+
+
+## Tree materialization
+
+`buildTree(events, { source })` converts the event stream into a wikist object
+graph. The parser itself stays event-first. Tree building is a consumer step
+for callers that want random-access traversal.
+
+`buildTreeWithDiagnostics(events, { source })` runs the same materialization,
+but it also preserves recovery diagnostics that would otherwise disappear once
+the tree has been built.
+
+The conversion rule is intentionally mechanical:
+
+```text
+event stream (simplified)
+  enter(root)
+  enter(paragraph)
+  text(0, 5)
+  exit(paragraph)
+  exit(root)
+
+tree
+  root
+  └─ paragraph
+     └─ text "hello"
+```
+
+Two concrete details matter for correctness and caller expectations.
+
+1. Root events are document boundaries, not nested root children.
+2. Text node values are materialized from source offsets, so `buildTree()`
+   requires the original source input.
+
+### Why `source` is required by `buildTree`
+
+The event stream is range-first. A text event carries offsets and position, not
+copied string content. Tree construction resolves that range on demand:
+
+```text
+text event range + source input -> Text.value
+```
+
+Without `source`, `buildTree()` could still build structural shape, but it
+could not materialize `Text.value` correctly.
+
+### Recovery behavior for malformed event streams
+
+`buildTree()` is defensive. It does not assume enter and exit events are always
+perfectly ordered.
+
+Case A, out-of-order exits:
+
+```text
+enter(paragraph)
+enter(bold)
+exit(paragraph)
+```
+
+Recovery action:
+
+```text
+close bold at the reported paragraph end
+close paragraph
+```
+
+Case B, stream ends with open frames:
+
+```text
+enter(paragraph)
+text(...)
+EOF
+```
+
+Recovery action:
+
+```text
+auto-close paragraph using its last known end point
+```
+
+`token` and `error` events are ignored for AST shape. They stay valuable in the
+event layer for diagnostics and tooling, but the current wikist tree model does
+not represent them as tree nodes.
+
+Instead, the diagnostics-preserving APIs keep them alongside the tree:
+
+```text
+ParseResult
+  ├─ tree: WikistRoot
+  └─ diagnostics: ParseDiagnostic[]
+```
+
+Each diagnostic carries an `anchor` to the nearest active node at the time of
+recovery, so downstream tools can locate the relevant region in the final tree
+without turning parser diagnostics into normal AST children.
+
+Today that anchor is a narrow tree-path snapshot. It resolves against one final
+materialized tree only. Edit-stable anchor identity, slot semantics, and other
+cross-edit guarantees stay out of the public API until session edit tracking
+exists.
+
+The consumer-side helper pair is:
+
+```text
+resolveDiagnosticAnchor(tree, diagnostic.anchor)
+locateDiagnostic(tree, diagnostic)
+```
+
+Those helpers turn the stored child-index path back into a concrete node,
+parent, and index, so editor and lint tooling can react without reimplementing
+tree walking logic.
+
 
 ## Session API
 
@@ -196,6 +345,7 @@ const session = createSession(source);
 session.events();        // full event stream
 session.outline();       // block-only events (cheap structural overlay)
 session.parse();         // full AST
+session.parseWithDiagnostics(); // full AST + recovery diagnostics
 
 // Streaming
 session.write(chunk);          // append-only streaming input
@@ -210,7 +360,7 @@ Session is built *on top of* the pipeline, not replacing it. Each tier adds
 capability without retroactive redesign:
 
 - **Core**: `createSession(source)` with `.events()`, `.outline()`,
-  `.parse()`. Caches the last parse result.
+  `.parse()`, and `.parseWithDiagnostics()`. Caches the last parse result.
 - **Streaming**: `.write(chunk)` for append-only streaming,
   `.drainStableEvents()` for stable prefix consumption.
 - **Incremental**: `.applyChanges(edits)` with incremental reparse, edit
@@ -397,6 +547,332 @@ Key algorithms:
   Triple braces `{{{param}}}` are `Argument` nodes. `{{#if:...}}` are
   `ParserFunction` (identified by `#` prefix). Variable-style magic words
   (`{{PAGENAME}}`) parse as `Template` by default; profiles reclassify.
+
+### HTML-like tag recovery boundary
+
+HTML-like and extension-like tags use one deliberate recognition boundary: the
+closing `>` of the opener.
+
+Read the policy like this:
+
+```text
+before `>`  -> opener is still unresolved, keep source as text
+after `>`   -> opener is structurally real, recover as a tag if later balancing breaks
+```
+
+That means three different cases behave differently.
+
+```text
+<ref foo<div>>body</ref>
+  -> opener closed with `>`
+  -> malformed attributes are tolerated
+  -> tag is recognized
+
+<ref name="x"
+  -> opener never reached `>`
+  -> emit an inline recovery diagnostic
+  -> preserve the original source as text
+
+<ref name="x">body
+  -> opener is real because `>` was reached
+  -> emit an inline recovery diagnostic for the missing close tag
+  -> keep the reference node and recover it to the end of the current text range
+```
+
+This is intentionally closer to HTML's permissive tag-tokenization spirit than
+to strict validation, but it is not a browser-DOM emulation. The parser does
+not commit to a tag node until the opener is syntactically closed with `>`.
+After that point, later breakage is treated as structural recovery, not as a
+reason to discard the opener and fall back to plain text.
+
+## Why the current perf boosts are shaped this way
+
+The recent parser performance work is not trying to make the parser less
+correct in exchange for speed. It is trying to remove repeated work that did
+not add new information.
+
+The easiest place to see that is the handoff from the block parser to the
+inline parser.
+
+Before the optimization, one paragraph like this:
+
+```text
+Hello [[Mars|planet]] world
+```
+
+could arrive at the inline parser as many small neighboring text events, each
+covering only one tokenizer-sized chunk. The inline parser then had to merge
+those neighboring events back together before it could even start looking for
+real inline syntax.
+
+That meant the pipeline was doing this:
+
+```text
+token stream
+  -> block parser emits many adjacent text ranges
+  -> inline parser merges them back into one logical text group
+  -> inline parser finally scans for [[, {{, '', <tag>, and so on
+```
+
+The newer block-parser optimization changes that handoff to this:
+
+```text
+token stream
+  -> block parser coalesces contiguous text into one larger source range
+  -> inline parser receives the already-merged text group
+  -> inline parser scans directly for real inline syntax
+```
+
+The important point is that both versions describe the same source bytes. The
+optimization removes redundant splitting and re-merging. It does not change the
+intended source coverage of the text range.
+
+That is why the change is compatible with the parser's range-first design. The
+contract is "text events point at the correct source range," not "text events
+must preserve tokenizer-sized boundaries."
+
+### What this optimization actually saves
+
+It saves three concrete kinds of work:
+
+1. Fewer text event objects at the block stage.
+2. Less array churn while the inline parser rebuilds logical text groups.
+3. Less per-token overhead in prose-heavy input where most bytes are ordinary
+   text and only a minority start real inline constructs.
+
+That matters most on article-sized input, where the dominant cost is often not
+the rare `[[` or `{{` opener itself, but the repeated work done around long
+runs of plain text.
+
+### Why the inline fast path is safe
+
+The inline parser also has a fast path for merged text groups that contain no
+possible inline opener at all.
+
+In plain English, that fast path says:
+
+```text
+if this whole text group contains no `[[`, `{{`, `''`, `<`, `&`, `__`, `~~~`,
+or bare-url opener,
+then do not build extra line tables and do not rescan the group character by
+character just to emit the same text range again.
+```
+
+That shortcut is safe because the block parser has already decided the exact
+source range that belongs to the block. When there is no possible inline opener
+inside that range, the inline parser would otherwise spend time reconstructing
+positions for an output that stays plain text.
+
+### One concrete handoff walkthrough
+
+The easiest way to make the block-to-inline handoff less abstract is to follow
+one real line of source through it.
+
+Start with this paragraph line:
+
+```text
+Hello [[Mars|planet]] world
+```
+
+At the block stage, the important question is only "which source bytes belong
+to this paragraph line?" The block parser does not decide what `[[Mars|planet]]`
+means yet. It just emits text ranges that cover the right bytes.
+
+In the older, more fragmented shape, that line could reach the inline parser as
+several neighboring text events. In the newer shape, the block parser hands the
+inline parser one already-merged text range for the whole line:
+
+```text
+block parser output
+  text("Hello [[Mars|planet]] world")
+```
+
+The inline parser then scans inside that one range from left to right:
+
+```text
+source: "Hello [[Mars|planet]] world"
+
+plain text before opener: "Hello "
+inline opener:            "[["
+inline construct:         "[[Mars|planet]]"
+plain text after link:    " world"
+```
+
+That scan does not emit text character by character. It holds onto a pending
+plain-text start offset, keeps moving forward, and only emits a plain-text
+event when it must split around a real inline construct.
+
+In other words, the inline parser behaves more like this:
+
+```text
+remember plain_start at the beginning
+scan until a real opener appears
+flush text before the opener
+emit events for the inline construct
+resume scanning after it
+flush any trailing plain text at the end
+```
+
+That is what "deferred plain-text emission" means here. The parser delays the
+plain-text event until it knows where the plain run actually ends.
+
+### Why the block parser still splits paragraph text at physical newlines
+
+This is the natural follow-up question:
+
+```text
+If two neighboring paragraph lines have no block markup of their own,
+why not send the whole multi-line paragraph to the inline parser as one range?
+```
+
+The short answer is: the current handoff format uses contiguous source ranges,
+but paragraph continuation newlines are treated as block-side structure rather
+than inline text.
+
+Take this paragraph:
+
+```text
+Alpha beta
+Gamma delta
+```
+
+In raw source offsets, that is not one continuous "text without separators"
+range. It is:
+
+```text
+[Alpha beta][\n][Gamma delta]
+```
+
+The current block parser intentionally treats that newline as a paragraph-line
+boundary. It keeps the paragraph node open across both lines, but it does not
+emit the newline itself as a `text` event. So the handoff today is effectively:
+
+```text
+enter("paragraph")
+  text("Alpha beta")
+  text("Gamma delta")
+exit("paragraph")
+```
+
+That means the split is not only about the inline parser's scanning ability.
+The inline parser can already scan across multiple lines when a text group
+contains them. The deeper issue is representational:
+
+1. A single `text` event currently means one contiguous source slice.
+2. The bytes between the two paragraph lines include a real newline.
+3. That newline is currently structural at the block stage, not emitted as
+  inline text.
+
+So if the block parser tried to collapse the two lines into one ordinary text
+event, it would have to do one of two undesirable things:
+
+1. Include the newline inside the text range, which would change today's event
+  meaning.
+2. Pretend `[Alpha beta]` and `[Gamma delta]` are one contiguous slice even
+  though they are not.
+
+That is why the parser currently splits at physical line boundaries even when
+both lines belong to the same paragraph.
+
+There is a possible future optimization here, but it would need a different
+handoff shape, not just a small local tweak. For example, the block-to-inline
+boundary could carry a discontiguous text group such as:
+
+```text
+paragraph text group
+  - [start of line 1, end of line 1)
+  - [start of line 2, end of line 2)
+```
+
+That would let the inline parser scan one logical paragraph payload without
+being told that the newline itself is plain text. But that is a different
+contract from the current `text(start_offset, end_offset)` event model.
+
+So the current line-by-line split is mostly a contract choice, not proof that
+the inline parser needs one line at a time. It is preserving two existing rules
+at once:
+
+- text events point at contiguous source slices
+- continuation newlines inside paragraphs are structural separators, not text
+
+### How positions are rebuilt without a point per character
+
+The inline parser still needs precise positions for the events it emits, but it
+does not store a full `{ line, column, offset }` point for every offset in the
+merged text range.
+
+Instead, it stores only the offsets where each line begins.
+
+Example:
+
+```text
+source: "Hello\n[[Mars]]"
+offsets: 01234567890123
+
+line starts: [0, 6]
+```
+
+That means:
+
+- line 1 starts at offset 0
+- line 2 starts at offset 6
+
+Later, if the inline parser needs the point for offset 9, it looks for the most
+recent line start at or before 9. That is 6, so offset 9 becomes line 2,
+column 4.
+
+This is the reason the current position work is expensive but not completely
+wasteful. The parser avoids one point object per code unit, but it still pays
+to build the final nested `position.start` and `position.end` objects for every
+event it emits.
+
+### The correctness boundary the perf work must not cross
+
+These optimizations only stay valid while they preserve source fidelity.
+
+That means:
+
+- they may merge adjacent text ranges
+- they may skip redundant rescans
+- they may avoid temporary arrays or closures
+
+But they must not:
+
+- trim real user content that still belongs to the block
+- rewrite spacing inside ordinary text ranges
+- invent or remove structural boundaries such as table-cell separators
+- make block parsing depend on inline meaning
+
+Preformatted lines are the clearest example. After the leading preformatted
+marker space, trailing spaces are still real content. A performance change that
+silently drops those spaces is not an optimization. It is a behavior change.
+
+### Why positions are still a major cost
+
+The current event stream carries full `position` objects on every event:
+
+```text
+text event
+  -> start point { line, column, offset }
+  -> end point   { line, column, offset }
+```
+
+That is useful for downstream tooling, but it is also expensive. The parser is
+not just allocating the final event object. It is also computing and allocating
+the nested point objects around it.
+
+The benchmark work in `mod_bench.ts` exists to split that cost into parts so we
+can ask a more precise question:
+
+- how much time comes from creating the event object itself?
+- how much comes from building fresh nested position objects?
+- how much comes from computing line and column data in the first place?
+
+That framing matters because it keeps the next performance decisions grounded.
+If the expensive part is mostly position computation and allocation, the right
+next step is not random micro-optimization. The right next step is to decide
+whether the parser needs eager full positions everywhere, or whether some mode
+can compute them lazily.
 
 
 ## Error recovery
