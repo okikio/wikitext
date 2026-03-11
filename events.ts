@@ -112,6 +112,104 @@ import type { TokenType } from './token.ts';
  */
 export type DiagnosticSeverity = 'error' | 'warning';
 
+/**
+ * Stable machine-readable diagnostic codes emitted by the parser itself.
+ *
+ * This object behaves like an enum without using a TypeScript `enum` runtime.
+ * Callers can compare against these values directly:
+ *
+ * ```ts
+ * import { DiagnosticCode } from './events.ts';
+ *
+ * if (event.kind === 'error' && event.code === DiagnosticCode.UNCLOSED_TABLE) {
+ *   // offer a quick fix, surface a warning, or log telemetry
+ * }
+ * ```
+ *
+ * The keys group the recoveries the parser currently knows how to describe in
+ * a stable way. The human-readable `message` still explains the specific case,
+ * but the code is the field consumers should match on.
+ *
+ * This object is frozen on purpose. It is the parser's own stable vocabulary,
+ * not a plugin registration table. Callers that need custom codes can still
+ * emit any string through `ErrorEvent.code` or `ParseDiagnostic.code` without
+ * mutating the shared parser-owned constant map.
+ */
+export const DiagnosticCode = Object.freeze({
+  /**
+   * The block parser reached end of input before a table closed with `|}`.
+   *
+   * Typical input:
+   *
+   * ```text
+   * {| class="wikitable"
+   * | Cell
+   * ```
+   *
+   * Reasonable responses include surfacing a warning in an editor, offering a
+   * quick fix that inserts `|}`, or ignoring it in a best-effort preview that
+   * only needs a usable recovered tree.
+   */
+  UNCLOSED_TABLE: 'UNCLOSED_TABLE',
+
+  /**
+   * The inline parser reached end of input before an HTML-like opener reached
+   * its closing `>`.
+   *
+   * Typical input:
+   *
+   * ```text
+   * <ref name="cite-1"
+   * ```
+   *
+   * The parser preserves the original source as text instead of materializing
+   * a tag node, because the opener never became structurally complete.
+   */
+  INLINE_TAG_UNTERMINATED_OPENER: 'INLINE_TAG_UNTERMINATED_OPENER',
+
+  /**
+   * The inline parser recognized an HTML-like opener, but no matching close
+   * tag was found before the enclosing text range ended.
+   *
+   * Typical input:
+   *
+   * ```text
+   * <ref name="cite-1">body
+   * ```
+   *
+   * The parser keeps the opener as structurally real, recovers by extending
+   * the node to the end of the current text range, and emits this warning.
+   */
+  INLINE_TAG_MISSING_CLOSE: 'INLINE_TAG_MISSING_CLOSE',
+
+  /**
+   * The tree builder saw an exit for one node while a different node was still
+   * open, so it auto-closed the inner node first to restore nesting.
+   */
+  TREE_MISMATCHED_EXIT: 'TREE_MISMATCHED_EXIT',
+
+  /**
+   * The tree builder saw an exit event that did not match any open node and
+   * had to drop it at the root boundary.
+   */
+  TREE_ORPHAN_EXIT: 'TREE_ORPHAN_EXIT',
+
+  /**
+   * The event stream ended while one or more nodes were still open, so the
+   * tree builder auto-closed them at their last known end point.
+   */
+  TREE_EOF_AUTOCLOSE: 'TREE_EOF_AUTOCLOSE',
+} as const);
+
+/**
+ * Known machine-readable diagnostic codes emitted by the current parser.
+ *
+ * Callers may still encounter custom string codes from tests, adapters, or
+ * future extensions, so event and parse-result shapes keep `code` open to any
+ * string. This alias is the stable subset owned by the parser today.
+ */
+export type KnownDiagnosticCode = typeof DiagnosticCode[keyof typeof DiagnosticCode];
+
 // ---------------------------------------------------------------------------
 // Position types (unist-compatible)
 // ---------------------------------------------------------------------------
@@ -289,8 +387,12 @@ export interface ErrorEvent {
   readonly severity?: DiagnosticSeverity;
   /**
    * Stable machine-readable code for programmatic filtering and telemetry.
+    *
+    * When the parser owns the recovery, prefer matching against
+    * {@linkcode DiagnosticCode}. That keeps consumers stable even if the
+    * human-readable `message` changes.
    */
-  readonly code?: string;
+  readonly code?: KnownDiagnosticCode | string;
   /**
    * Indicates whether parsing continued with a deterministic recovery path.
    */
@@ -313,8 +415,12 @@ export interface ErrorEvent {
 export interface ErrorEventOptions {
   /** Severity level for this diagnostic. */
   readonly severity?: DiagnosticSeverity;
-  /** Stable machine-readable code. */
-  readonly code?: string;
+  /**
+   * Stable machine-readable code.
+   *
+   * Use a {@linkcode DiagnosticCode} member for parser-owned recoveries.
+   */
+  readonly code?: KnownDiagnosticCode | string;
   /** Whether the parser recovered and continued. */
   readonly recoverable?: boolean;
   /** Parser stage that emitted the diagnostic. */
@@ -511,6 +617,17 @@ export function tokenEvent(
  * {@linkcode ErrorEventOptions} object to attach structured diagnostic
  * metadata (severity, machine-readable code, recovery status, source
  * stage, and arbitrary details).
+ *
+ * The message should explain the local recovery in plain English. The code is
+ * what downstream tooling should usually match on.
+ *
+ * For example, an editor may decide to:
+ *
+ * - show a gutter warning for malformed input
+ * - offer a quick fix for a known missing delimiter
+ * - ignore the diagnostic during tolerant preview rendering
+ *
+ * Those responses are consumer choices, not parser requirements.
  *
  * @example Emitting an error for an unclosed template
  * ```ts
