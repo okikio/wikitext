@@ -19,9 +19,10 @@ constructs. It does not expand templates or render HTML: it is a source parser.
 - **Event-stream-first architecture**: events are the fundamental output; AST,
   HTML compilation, and filtering are all consumers of the same event stream.
 - **Sync pull APIs available today**: `tokens()`, `outlineEvents()`,
-  `events()`, and `parse()` expose the current tokenizer, event, and tree
-  layers without extra wrapper code.
-- **Never throws**: produces a valid tree for any input with error recovery.
+  `events()`, `parse()`, `parseWithDiagnostics()`, and `parseStrict()` expose
+  the current tokenizer, event, and tree layers without extra wrapper code.
+- **Never throws**: preserves malformed-input findings without crashing the
+  parser.
 - **UTF-16 position semantics**: offsets match `string.charCodeAt(i)` and LSP.
 - **unist-compatible**: works with `unist-util-visit` and the unified ecosystem.
 - **High performance**: `charCodeAt` scanning, offset-based tokens, single-pass
@@ -50,8 +51,8 @@ The package already ships the foundational public surface:
 - event types, constructors, and type guards
 - wikist node interfaces, unions, builders, and type guards
 - `blockEvents()` and `inlineEvents()`
-- `tokens()`, `outlineEvents()`, `events()`, `parse()`, `parseWithDiagnostics()`, and `parseWithRecovery()`
-- `buildTree()`, `buildTreeWithDiagnostics()`, `buildTreeWithRecovery()`, `filter()`, `visit()`, `resolveTreePath()`, `resolveDiagnosticAnchor()`, `locateDiagnostic()`, and `createSession()`
+- `tokens()`, `outlineEvents()`, `events()`, `parse()`, `parseWithDiagnostics()`, `parseStrict()`, and `parseWithRecovery()`
+- `buildTree()`, `buildTreeWithDiagnostics()`, `buildTreeStrict()`, `buildTreeWithRecovery()`, `filter()`, `visit()`, `resolveTreePath()`, `resolveDiagnosticAnchor()`, `locateDiagnostic()`, and `createSession()`
 
 The higher-level orchestration APIs shown in some examples below are still in
 progress:
@@ -86,8 +87,8 @@ for (const evt of outlineEvents(largeArticle)) {
 
 > **Note:** `stringify()` and `parseChunked()` are still not implemented. The
 > sync orchestration layer is now available: `tokens()`, `outlineEvents()`,
-> `events()`, `parse()`, `parseWithDiagnostics()`, `parseWithRecovery()`, `buildTree()`,
-> `buildTreeWithDiagnostics()`, `buildTreeWithRecovery()`, `filter()`, `visit()`, `resolveTreePath()`,
+> `events()`, `parse()`, `parseWithDiagnostics()`, `parseStrict()`, `parseWithRecovery()`, `buildTree()`,
+> `buildTreeWithDiagnostics()`, `buildTreeStrict()`, `buildTreeWithRecovery()`, `filter()`, `visit()`, `resolveTreePath()`,
 > `resolveDiagnosticAnchor()`, `locateDiagnostic()`, and the basic
 > `createSession()` wrapper all ship on top of the existing tokenizer, block
 > parser, and inline parser.
@@ -189,27 +190,23 @@ committed to.
 
 ## Recovery APIs
 
-The parser always produces a valid result. What the public API lets you choose
-is whether you want the loose recovered tree or a stricter tree
-that leaves recovery-heavy constructs as plain source text while still telling
-you what went wrong.
+The parser always preserves a usable result. The primary malformed-input choice
+is whether you want diagnostics emitted at all. If you do, you can then choose
+whether to keep the default HTML-like materialization or request the more
+conservative source-strict tree.
 
-Here, `loose` and `strict` describe recovery shape, not parse success:
-
-- `loose` keeps more recovered wrapper structure when the parser can still
-  infer a usable node from the source
-- `strict` keeps the diagnostic, but prefers collapsing recovery-heavy
-  structure back to plain text when the source never clearly committed to that
-  structure
-
-- `parse(input)` returns the loose recovered tree only
-- `parseWithDiagnostics(input)` returns `{ tree, diagnostics }`, where `tree`
-  strips recovery-created wrapper nodes back to plain text when possible
+- `parse(input)` returns the default tree only
+- `parseWithDiagnostics(input)` returns `{ tree, diagnostics }` with the same
+  default tree shape as `parse(input)`
+- `parseStrict(input)` returns `{ tree, diagnostics }` with a conservative tree
+  that collapses recovery-heavy wrappers back to plain text when the source did
+  not clearly commit to them
 - `parseWithRecovery(input)` returns `{ tree, recovered, diagnostics }` with
-  the more aggressively recovered tree
+  the same default tree shape as `parseWithDiagnostics(input)` plus an explicit
+  summary field
 
-That gives you a default lane, a strict diagnostics lane, and an explicit
-recovery-aware lane:
+That gives you a cheap lane, a diagnostics-first lane, a conservative
+materialization lane, and an explicit recovery-summary lane:
 
 ```ts
 const tree = parse(source);
@@ -217,14 +214,28 @@ const tree = parse(source);
 const diagnostics = parseWithDiagnostics(source);
 console.warn(diagnostics.diagnostics);
 
+const conservative = parseStrict(source);
+console.warn(conservative.diagnostics);
+
 const result = parseWithRecovery(source);
 if (result.recovered) {
   console.warn(result.diagnostics);
 }
 ```
 
-The same split exists on sessions through `session.parseWithDiagnostics()` and
-`session.parseWithRecovery()`.
+The same split exists on sessions through `session.parseWithDiagnostics()`,
+`session.parseStrict()`, and `session.parseWithRecovery()`.
+
+One important nuance: `parseStrict()` is the conservative tree lane, not a full
+"I will decide every recovery later" lane. It still chooses a final tree policy
+for the caller. A stronger diagnostics-first mode where findings and candidate
+recoveries are exposed before final materialization is still a future design
+question rather than a current public API.
+
+For event streams, diagnostics are opt-in. `events(input)` and
+`outlineEvents(input)` stay on the cheapest lane by default. Pass
+`{ include_diagnostics: true }` when you want parser findings preserved in the
+stream.
 
 ## Performance invariants
 
@@ -279,9 +290,10 @@ grounded in measured behavior instead of guesswork.
 `parse()` still returns only the tree. That is the smallest, easiest API for
 callers that only want document structure.
 
-When a caller also needs recovery details, use `parseWithDiagnostics()` or
-`buildTreeWithDiagnostics()`. Those APIs return a stricter tree plus a
-`diagnostics` array.
+When a caller also needs parser findings, use `parseWithDiagnostics()` or
+`buildTreeWithDiagnostics()`. Those APIs return the default tree plus a
+`diagnostics` array. If the caller wants a more conservative tree shape, use
+`parseStrict()` or `buildTreeStrict()` instead.
 
 Each diagnostic carries an `anchor`. Today that anchor is intentionally narrow:
 it is a tree-path snapshot to the nearest materialized node around the
@@ -355,7 +367,8 @@ current internals.
 | Function | Description |
 |----------|-------------|
 | `parse(input)` | Parse wikitext into a `WikistRoot` AST. **Available now.** |
-| `parseWithDiagnostics(input)` | Parse to `{ tree, diagnostics }` without losing recovery information. **Available now.** |
+| `parseWithDiagnostics(input)` | Parse to `{ tree, diagnostics }` with the default HTML-like materialization. **Available now.** |
+| `parseStrict(input)` | Parse to `{ tree, diagnostics }` with the conservative source-strict materialization. **Available now.** |
 | `stringify(tree)` | Serialize a wikist tree back to wikitext. _Not yet implemented._ |
 | `events(input)` | Full event stream (block + inline). **Available now.** |
 | `outlineEvents(input)` | Block-only event stream (no inline parsing). **Available now.** |
@@ -370,7 +383,8 @@ current internals.
 | `blockEvents(source, tokens)` | Block-level event stream from tokens. **Available now.** |
 | `inlineEvents(source, blockEvents)` | Inline event enrichment over block events. **Available now.** |
 | `buildTree(events, { source })` | Build AST from an event iterable plus source. **Available now.** |
-| `buildTreeWithDiagnostics(events, { source })` | Build `{ tree, diagnostics }` from an event iterable plus source. **Available now.** |
+| `buildTreeWithDiagnostics(events, { source })` | Build `{ tree, diagnostics }` with the default HTML-like materialization. **Available now.** |
+| `buildTreeStrict(events, { source })` | Build `{ tree, diagnostics }` with the conservative source-strict materialization. **Available now.** |
 
 ### Tree utilities
 
@@ -381,7 +395,7 @@ current internals.
 | `resolveTreePath(tree, path)` | Resolve a root-relative child-index path back to a node. **Available now.** |
 | `resolveDiagnosticAnchor(tree, anchor)` | Resolve a diagnostic anchor back to the nearest node. **Available now.** |
 | `locateDiagnostic(tree, diagnostic)` | Resolve a diagnostic's `anchor` back to the nearest node. **Available now.** |
-| `createSession(source)` | Cached sync wrapper for `outline()`, `events()`, `parse()`, and `parseWithDiagnostics()`. **Available now.** |
+| `createSession(source)` | Cached sync wrapper for `outline()`, `events()`, `parse()`, `parseWithDiagnostics()`, and `parseStrict()`. **Available now.** |
 
 ### Foundation (available now)
 
