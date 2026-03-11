@@ -20,6 +20,7 @@ import {
   spacing_heavy_wikitext_string,
   wikiish_string,
 } from './_test_utils/arbitraries.ts';
+import { UNICODE_TEXT_FIXTURES } from './_test_utils/unicode_fixtures.ts';
 import { tokenize } from './tokenizer.ts';
 import { TokenType } from './token.ts';
 import type { Token } from './token.ts';
@@ -749,6 +750,33 @@ describe('edge cases', () => {
     expect(typeAt(t, 0)).toBe(TokenType.TEXT);
   });
 
+  for (const fixture of UNICODE_TEXT_FIXTURES) {
+    it(`${fixture.label} stays plain text`, () => {
+      const t = tokens(fixture.sample);
+
+      expect(t).toHaveLength(2);
+      expect(t[0].type).toBe(TokenType.TEXT);
+      expect(t[0].start).toBe(0);
+      expect(t[0].end).toBe(fixture.sample.length);
+      expect(t[1]).toEqual({
+        type: TokenType.EOF,
+        start: fixture.sample.length,
+        end: fixture.sample.length,
+      });
+    });
+
+    it(`keeps ${fixture.label} inside valid heading syntax`, () => {
+      const input = `== ${fixture.sample} ==`;
+      const t = tokens(input);
+      const payload = t.find((tok) =>
+        tok.type === TokenType.TEXT && input.slice(tok.start, tok.end).includes(fixture.sample)
+      );
+
+      expect(typeAt(t, 0)).toBe(TokenType.HEADING_MARKER);
+      expect(payload).toBeDefined();
+    });
+  }
+
   it('single { is TEXT', () => {
     const t = tokens('{');
     expect(typeAt(t, 0)).toBe(TokenType.TEXT);
@@ -942,6 +970,22 @@ describe('stress tests', () => {
     expect(t[0].type).toBe(TokenType.TEXT);
     expect(t[0].end).toBe(cjk.length);
   });
+
+  for (const fixture of UNICODE_TEXT_FIXTURES) {
+    it(`10K of ${fixture.label} stays tiled and text-only`, () => {
+      const input = `${fixture.sample}`.repeat(Math.ceil(10_000 / fixture.sample.length));
+      const t = tokens(input);
+
+      expect(t).toHaveLength(2);
+      expect(t[0].type).toBe(TokenType.TEXT);
+      expect(t[0].end).toBe(input.length);
+      expect(t[1]).toEqual({
+        type: TokenType.EOF,
+        start: input.length,
+        end: input.length,
+      });
+    });
+  }
 
   it('thousands of __ pairs (pathological underscore input)', () => {
     // 5000 pairs of __ with no letters between => all TEXT
