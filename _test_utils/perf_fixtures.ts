@@ -494,12 +494,28 @@ export function drainSessionLayeredWorkflowWarm(source: string): number {
   return outline_count + full_event_count + tree_child_count;
 }
 
+export function drainSessionOutlineCold(source: string): number {
+  let count = 0;
+  for (const _event of createSession(source).outline()) {
+    count++;
+  }
+  return count;
+}
+
 export function drainSessionOutlineWarm(source: string): number {
   const session = createSession(source);
   Array.from(session.outline());
 
   let count = 0;
   for (const _event of session.outline()) {
+    count++;
+  }
+  return count;
+}
+
+export function drainSessionEventsCold(source: string): number {
+  let count = 0;
+  for (const _event of createSession(source).events()) {
     count++;
   }
   return count;
@@ -516,8 +532,36 @@ export function drainSessionEventsWarm(source: string): number {
   return count;
 }
 
+export function drainSessionParseCold(source: string): number {
+  return createSession(source).parse().children.length;
+}
+
 export function drainSessionParseWarm(source: string): number {
   const session = createSession(source);
   session.parse();
   return session.parse().children.length;
+}
+
+export function drainSessionParseWithDiagnosticsCold(source: string): number {
+  const result = createSession(source).parseWithDiagnostics();
+  return result.tree.children.length + result.diagnostics.length;
+}
+
+export function drainSessionParseWithDiagnosticsWarm(source: string): number {
+  const session = createSession(source);
+  session.parseWithDiagnostics();
+  const result = session.parseWithDiagnostics();
+  return result.tree.children.length + result.diagnostics.length;
+}
+
+export function drainSessionParseWithRecoveryCold(source: string): number {
+  const result = createSession(source).parseWithRecovery();
+  return result.tree.children.length + result.diagnostics.length + Number(result.recovered);
+}
+
+export function drainSessionParseWithRecoveryWarm(source: string): number {
+  const session = createSession(source);
+  session.parseWithRecovery();
+  const result = session.parseWithRecovery();
+  return result.tree.children.length + result.diagnostics.length + Number(result.recovered);
 }
