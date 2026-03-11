@@ -1,100 +1,81 @@
 # Architecture
 
-`@okikio/wikitext` is an event-stream-first wikitext source parser. It turns
-wikitext markup into a structured event stream and, optionally, a unist-compatible
-AST called "wikist" (Wiki Syntax Tree). The event stream is the fundamental
-interchange format: every output mode (AST, HTML, filtered events, direct
-callbacks) is a consumer of the same event pipeline.
+`@okikio/wikitext` is an event-stream-first wikitext source parser. The event
+stream is the central output. Trees, filters, later renderers, and session-
+oriented tools all consume that same underlying pipeline.
 
-This document describes the pipeline design, streaming modes, parser contracts,
-extension model, and the design constraints that enable live editing overlays.
+This file is now the short architecture landing page. The detailed material has
+been split into the [docs/architecture/](./architecture/README.md) folder so
+readers do not have to parse one very large note to find one specific idea.
 
-## Pipeline overview
+## Start here
 
-The parser runs as a four-stage pipeline. Each stage is a generator that pulls
-from the previous one, so the entire parse is lazy and single-pass from the
-caller's perspective. All stages accept a `TextSource` (an abstraction over
-strings, ropes, and CRDT text types) rather than a bare `string`.
+- [docs/architecture/choosing-a-tree.md](./architecture/choosing-a-tree.md)
+  Explains the real caller-facing choice between the cheap tree, the default
+  tolerant diagnostics lane, and the conservative diagnostics lane.
+- [docs/architecture/pipeline.md](./architecture/pipeline.md)
+  Explains the tokenizer -> block parser -> inline parser -> consumer flow.
+- [docs/architecture/malformed-input.md](./architecture/malformed-input.md)
+  Explains commitment points, diagnostics, and tolerant versus conservative
+  tree materialization.
+- [docs/architecture/parser-contracts.md](./architecture/parser-contracts.md)
+  Lists the invariants that all parser paths need to preserve.
+- [docs/architecture/sessions-and-streaming.md](./architecture/sessions-and-streaming.md)
+  Explains sessions, cache lanes, streaming, and incremental direction.
 
-```
-TextSource
-   │
-   ▼
-┌────────────┐  charCodeAt scanner
-│ Tokenizer  │  Generator<Token>
-│            │  offset-based tokens (no value strings)
-└─────┬──────┘
-      │
-      ▼
-┌──────────────┐  line-start dispatch
-│ Block Parser │  enter/exit events for block structures
-│              │  records state snapshots at boundaries
-└─────┬────────┘
-      │
-      ▼
-┌───────────────┐  recursive descent with explicit stack
-│ Inline Parser │  enriches text events with inline markup
-│               │  enter/exit for bold, links, templates, ...
-└─────┬─────────┘
-      │
-      ▼
-┌───────────┐
-│ Consumers │
-│           ├── buildTree()      → WikistRoot (AST)
-│           ├── compileHtml()    → string (HTML)
-│           ├── filterEvents()   → filtered event stream
-│           └── direct callback  → user-defined handler
-└───────────┘
-```
-
-Each stage can also be used independently:
-- `tokens(input)` returns the raw token stream (cheapest path).
-- `outlineEvents(input)` returns block-level events only (no inline parsing).
-- `events(input)` returns the full event stream (block + inline).
-- `parse(input)` is shorthand for `buildTree(events(input), { source: input })`.
-- `parseWithDiagnostics(input)` keeps the default tree plus parser diagnostics.
-- `parseStrict(input)` keeps diagnostics plus a conservative source-strict tree.
-- `parseWithRecovery(input)` keeps the default tree plus an explicit recovery flag and diagnostics.
-
-The main cost split is diagnostic emission. If a caller does not want
-diagnostics, the block and inline stages do not emit diagnostic events for that
-lane. If a caller does want diagnostics, they can then choose whether to keep
-the default HTML-like tree shape or ask for the more conservative
-source-strict materialization.
-
-The extra `source` argument on `buildTree()` exists because the event stream is
-range-first. Text events carry offsets, not copied strings, so the tree
-builder needs the original source to materialize `Text.value`.
-
-This means parser continuation and caller-visible materialization are separate
-choices. The parser still upholds its never-throw contract, but callers can
-choose whether they want only the default tree, the default tree plus
-diagnostics, a conservative tree plus diagnostics, or the default tree plus
-diagnostics and an explicit recovery summary.
-
-Those top-level APIs now exist in the codebase. Lower-level modules such as
-`TextSource`, tokens, events, AST node types/builders/guards, `tokenize()`,
-`blockEvents()`, and `inlineEvents()` still matter because they are the
-cheapest direct hooks for callers that want tighter control over cost or
-streaming behavior.
-
-The session wrapper follows the same idea. It is not a different parser. It is
-the same pipeline with layered caches so repeated queries can reuse earlier
-work.
+## The short architecture story
 
 ```text
-createSession(source)
-  ├─► outline()              -> cached block events
-  ├─► events()               -> cached full events
-  ├─► parse()                -> cheap default tree lane
-  ├─► parseWithDiagnostics() -> default tree + diagnostics
-  ├─► parseStrict()          -> conservative tree + diagnostics
-  └─► parseWithRecovery()    -> default tree + diagnostics + recovered
+TextSource
+  -> tokenize()
+  -> blockEvents()
+  -> inlineEvents()
+  -> tree or other consumers
 ```
 
-That lane split matters for performance. If a caller says they do not want
-diagnostics, the session should not force them to pay for diagnostic event
-allocation or diagnostics-enabled caches unless some other path already did.
+The parser stays event-stream-first so callers can stop at the cheapest useful
+layer:
+
+- `tokens()` for raw token inspection
+- `outlineEvents()` for cheap block structure
+- `events()` for the full event stream
+- `parse()` and related helpers for tree materialization
+
+The tree APIs are easiest to understand as two separate choices:
+
+```text
+1. do you want diagnostics preserved?
+2. if yes, which final tree policy do you want?
+```
+
+That is why the current public lanes are:
+
+- `parse()`
+- `parseWithDiagnostics()`
+- `parseStrict()`
+- `parseWithRecovery()`
+
+## Why the split docs exist
+
+The original architecture note tried to explain all of these at once:
+
+- the pipeline
+- tree materialization
+- malformed-input philosophy
+- parser contracts
+- sessions and streaming
+- incremental and editor-oriented constraints
+
+That made it too easy for the actual user-facing decisions to get buried under
+implementation detail. The split docs fix that by letting each note answer one
+real question.
+
+## Related design notes
+
+- [docs/diagnostics-first-redesign.md](./diagnostics-first-redesign.md)
+- [docs/future-direction.md](./future-direction.md)
+- [docs/parser-architecture-comparison.md](./parser-architecture-comparison.md)
+- [docs/corpus-matrix.md](./corpus-matrix.md)
 
 
 ## Events as the interchange layer
