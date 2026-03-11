@@ -19,8 +19,8 @@ import {
 import { tokenize } from './tokenizer.ts';
 import { blockEvents } from './block_parser.ts';
 import { inlineEvents } from './inline_parser.ts';
-import { textEvent } from './events.ts';
-import type { EnterEvent, ExitEvent, WikitextEvent } from './events.ts';
+import { DiagnosticCode, textEvent } from './events.ts';
+import type { EnterEvent, ErrorEvent, ExitEvent, WikitextEvent } from './events.ts';
 
 function parse(input: string): WikitextEvent[] {
   return [...inlineEvents(input, blockEvents(input, tokenize(input)))];
@@ -55,6 +55,13 @@ function textValues(events: WikitextEvent[], source: string): string[] {
       if (event.kind !== 'text') return '';
       return source.slice(event.start_offset, event.end_offset);
     });
+}
+
+/** Collect machine-readable codes from recovery events. */
+function errorCodes(events: WikitextEvent[]): string[] {
+  return events
+    .filter((event): event is ErrorEvent => event.kind === 'error')
+    .map((event) => event.code ?? '');
 }
 
 describe('inlineEvents — text-group boundaries', () => {
@@ -389,6 +396,48 @@ describe('inlineEvents — templates and special inline nodes', () => {
     });
   });
 
+  it('keeps malformed-but-closed tag openers structurally real once `>` is reached', () => {
+    const input = `<span foo<div>>hi</span>`;
+    const events = parse(input);
+    const tag = expectEnter(events, 'html-tag');
+
+    expect(tag.props).toEqual({
+      tag_name: 'span',
+      self_closing: false,
+      attributes: { foo: '', div: '' },
+    });
+    expect(textValues(events, input)).toContain('hi');
+  });
+
+  it('recovers a missing close tag after a complete reference opener', () => {
+    const input = `<ref name="cite-1">''quoted''`;
+    const events = parse(input);
+    const reference = expectEnter(events, 'reference');
+
+    expect(reference.props).toEqual({ name: 'cite-1' });
+    expect(structure(events)).toContainEqual(['enter', 'italic']);
+    expect(errorCodes(events)).toContain(DiagnosticCode.INLINE_TAG_MISSING_CLOSE);
+  });
+
+  it('recovers a missing close tag after a complete nowiki opener', () => {
+    const input = `<nowiki>[[literal]]`;
+    const events = parse(input);
+    const nowiki = expectEnter(events, 'nowiki');
+
+    expect(nowiki.props).toEqual({ value: '[[literal]]' });
+    expect(firstEnter(events, 'wikilink')).toBeUndefined();
+    expect(errorCodes(events)).toContain(DiagnosticCode.INLINE_TAG_MISSING_CLOSE);
+  });
+
+  it('preserves an unterminated opener as text when `>` never appears', () => {
+    const input = `<ref name="cite-1"`;
+    const events = parse(input);
+
+    expect(firstEnter(events, 'reference')).toBeUndefined();
+    expect(textValues(events, input).join('')).toBe(input);
+    expect(errorCodes(events)).toContain(DiagnosticCode.INLINE_TAG_UNTERMINATED_OPENER);
+  });
+
   it('handles highly mixed inline markup without losing nested structure', () => {
     const input = `[[File:Example.jpg|thumb|{{Card|name=[[Main Page|home]]}} <ref name="n">''quoted'' &amp;</ref>]]`;
     const events = parse(input);
@@ -599,7 +648,7 @@ describe('inlineEvents — invariants', () => {
   it('keeps enter and exit events balanced on pathological mixed input', () => {
     fc.assert(
       fc.property(pathological_wikitext_string(), (input) => {
-        // Inline recovery can choose many conservative outputs, but it must not
+        // Inline recovery can choose many strict outputs, but it must not
         // produce broken nesting. Balance is the core contract that downstream
         // consumers rely on.
         const events = parse(input);
