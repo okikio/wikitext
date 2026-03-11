@@ -307,46 +307,46 @@ describe('type guards', () => {
 describe('type guard narrowing', () => {
   it('narrows EnterEvent fields', () => {
     const evt: WikitextEvent = enterEvent('heading', { level: 3 }, pos);
-    if (isEnterEvent(evt)) {
+    const is_enter = isEnterEvent(evt);
+    expect(is_enter, 'Expected EnterEvent').toBe(true);
+    if (is_enter) {
       // TypeScript narrows to EnterEvent here.
       const _nodeType: string = evt.node_type;
       const _props: Readonly<Record<string, unknown>> = evt.props;
       expect(_nodeType).toBe('heading');
       expect(_props).toEqual({ level: 3 });
-    } else {
-      throw new Error('Expected EnterEvent');
     }
   });
 
   it('narrows ExitEvent fields', () => {
     const evt: WikitextEvent = exitEvent('list', pos);
-    if (isExitEvent(evt)) {
+    const is_exit = isExitEvent(evt);
+    expect(is_exit, 'Expected ExitEvent').toBe(true);
+    if (is_exit) {
       const _nodeType: string = evt.node_type;
       expect(_nodeType).toBe('list');
-    } else {
-      throw new Error('Expected ExitEvent');
     }
   });
 
   it('narrows TextEvent offsets', () => {
     const evt: WikitextEvent = textEvent(3, 8, pos);
-    if (isTextEvent(evt)) {
+    const is_text = isTextEvent(evt);
+    expect(is_text, 'Expected TextEvent').toBe(true);
+    if (is_text) {
       const _start: number = evt.start_offset;
       const _end: number = evt.end_offset;
       expect(_start).toBe(3);
       expect(_end).toBe(8);
-    } else {
-      throw new Error('Expected TextEvent');
     }
   });
 
   it('narrows TokenEvent token_type', () => {
     const evt: WikitextEvent = tokenEvent(TokenType.TABLE_OPEN, 5, 7, pos);
-    if (isTokenEvent(evt)) {
+    const is_token = isTokenEvent(evt);
+    expect(is_token, 'Expected TokenEvent').toBe(true);
+    if (is_token) {
       const _tokenType: string = evt.token_type;
       expect(_tokenType).toBe('TABLE_OPEN');
-    } else {
-      throw new Error('Expected TokenEvent');
     }
   });
 
@@ -355,13 +355,13 @@ describe('type guard narrowing', () => {
       severity: 'warning',
       code: 'TEST_CODE',
     });
-    if (isErrorEvent(evt)) {
+    const is_error = isErrorEvent(evt);
+    expect(is_error, 'Expected ErrorEvent').toBe(true);
+    if (is_error) {
       const _msg: string = evt.message;
       expect(_msg).toBe('bad input');
       expect(evt.severity).toBe('warning');
       expect(evt.code).toBe('TEST_CODE');
-    } else {
-      throw new Error('Expected ErrorEvent');
     }
   });
 });
