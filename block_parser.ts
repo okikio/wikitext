@@ -72,11 +72,24 @@ import type { Token } from './token.ts';
 import type { Position, Point, WikitextEvent } from './events.ts';
 import { TokenType } from './token.ts';
 import {
+  DiagnosticCode,
   enterEvent,
   exitEvent,
   textEvent,
   errorEvent,
 } from './events.ts';
+
+/**
+ * Optional switches for block-event generation.
+ *
+ * The block parser always keeps recovering structurally so the event stream
+ * stays usable. The only question here is whether this caller also wants the
+ * block-owned recovery diagnostics preserved in that stream.
+ */
+interface BlockEventOptions {
+  /** Whether block-stage recovery events such as unclosed-table warnings are emitted. */
+  readonly include_diagnostics?: boolean;
+}
 
 // ---------------------------------------------------------------------------
 // Position helpers
@@ -137,20 +150,34 @@ interface TokenBuffer {
   current: Token | null;
   /** Tracks line/column from newline tokens. */
   tracker: LineTracker;
+  /** Whether this parse lane wants block-stage diagnostics. */
+  emit_diagnostics: boolean;
 }
 
-/** Create a token buffer whose cursor starts at the first token. */
-function createBuffer(tokens: Iterable<Token>): TokenBuffer {
+/**
+ * Create a token buffer whose cursor starts at the first token.
+ *
+ * This keeps three pieces of state together because block parsing needs all of
+ * them at once: the current token, the line tracker used for event positions,
+ * and whether this caller asked for block-stage diagnostics.
+ */
+function createBuffer(tokens: Iterable<Token>, emit_diagnostics: boolean): TokenBuffer {
   const iter = tokens[Symbol.iterator]();
   const first = iter.next();
   return {
     iter,
     current: first.done ? null : first.value,
     tracker: { line: 1, line_offset: 0 },
+    emit_diagnostics,
   };
 }
 
-/** Consume the current token and move to the next one, updating line tracking on newlines. */
+/**
+ * Consume the current token and move to the next one.
+ *
+ * Newlines are where line/column state advances, so this helper is the single
+ * place that keeps token consumption and source-position tracking in sync.
+ */
 function advance(buf: TokenBuffer): void {
   if (buf.current && buf.current.type === TokenType.NEWLINE) {
     advanceLine(buf.tracker, buf.current.end);
@@ -194,6 +221,40 @@ interface ListLevel {
   /** Whether the list is ordered (only for 'list'). */
   ordered: boolean;
 }
+
+const DEFAULT_LIST_LEVEL: ListLevel = {
+  kind: 'bullet',
+  list_type: 'list',
+  ordered: false,
+};
+
+/**
+ * Fixed marker-to-list metadata map used while parsing list prefixes.
+ *
+ * This is a small hot mapping, not general control flow. A null-prototype
+ * object keeps the vocabulary explicit, avoids inherited keys from the normal
+ * object prototype chain, and lets `Object.hasOwn(...)` answer "is this one of
+ * our markers?" without consulting names such as `toString` or `constructor`.
+ */
+const LIST_LEVEL_LOOKUP: Partial<Record<string, ListLevel>> = Object.assign(
+  Object.create(null),
+  {
+    '*': DEFAULT_LIST_LEVEL,
+    '#': { kind: 'ordered', list_type: 'list', ordered: true },
+    ';': { kind: 'definition-term', list_type: 'definition-list', ordered: false },
+    ':': { kind: 'definition-description', list_type: 'definition-list', ordered: false },
+  },
+);
+
+const LIST_MARKER_CHAR_LOOKUP: Partial<Record<TokenType, string>> = Object.assign(
+  Object.create(null),
+  {
+    [TokenType.BULLET]: '*',
+    [TokenType.HASH]: '#',
+    [TokenType.SEMICOLON]: ';',
+    [TokenType.COLON]: ':',
+  },
+);
 
 /**
  * One merged text range that still maps exactly back to the original source.
@@ -277,13 +338,28 @@ function pushTextSpan(
 }
 
 function markerToLevel(marker: string): ListLevel {
-  switch (marker) {
-    case '*': return { kind: 'bullet', list_type: 'list', ordered: false };
-    case '#': return { kind: 'ordered', list_type: 'list', ordered: true };
-    case ';': return { kind: 'definition-term', list_type: 'definition-list', ordered: false };
-    case ':': return { kind: 'definition-description', list_type: 'definition-list', ordered: false };
-    default: return { kind: 'bullet', list_type: 'list', ordered: false };
+  return Object.hasOwn(LIST_LEVEL_LOOKUP, marker)
+    ? LIST_LEVEL_LOOKUP[marker]!
+    : DEFAULT_LIST_LEVEL;
+}
+
+/**
+ * Return whether two marker levels can share the same open list wrapper.
+ *
+ * Raw marker characters are slightly too specific for this check. `;` and `:`
+ * produce different child node types, but they still belong to the same
+ * `definition-list` wrapper at a given depth.
+ */
+function canReuseListLevel(openLevel: ListLevel, nextLevel: ListLevel): boolean {
+  if (openLevel.list_type !== nextLevel.list_type) {
+    return false;
   }
+
+  if (openLevel.list_type === 'definition-list') {
+    return true;
+  }
+
+  return openLevel.ordered === nextLevel.ordered;
 }
 
 // ---------------------------------------------------------------------------
@@ -301,14 +377,20 @@ function markerToLevel(marker: string): ListLevel {
  * The generator never throws. Malformed or unexpected token sequences
  * produce recovery error events and the parser continues.
  *
+ * Current diagnostic scope is intentionally narrow. This stage only reports
+ * block-owned recovery facts, such as reaching EOF before a table closed. It
+ * does not try to attach tree anchors itself because those depend on later
+ * tree materialization.
+ *
  * @param source - The text source backing the tokens (for offset resolution).
  * @param tokens - Token iterable, typically from `tokenize(source)`.
  */
 export function* blockEvents(
   source: TextSource,
   tokens: Iterable<Token>,
+  options: BlockEventOptions = {},
 ): Generator<WikitextEvent> {
-  const buf = createBuffer(tokens);
+  const buf = createBuffer(tokens, options.include_diagnostics !== false);
 
   // Wrap the root document in enter/exit.
   const startPt = pointAt(buf.tracker, 0);
@@ -526,6 +608,9 @@ function* parseHeading(
  *
  * This is a fixed string vocabulary, so a null-prototype object is a tighter
  * fit than a `Set` for the hot membership check inside paragraph parsing.
+ * `Object.create(null)` removes the usual prototype chain, and
+ * `Object.hasOwn(...)` keeps the check on the table's own keys instead of
+ * inherited names such as `toString`.
  */
 const BLOCK_START_TOKEN_LOOKUP: Partial<Record<TokenType, true>> = Object.assign(
   Object.create(null),
@@ -748,13 +833,16 @@ function* parseList(
     // Close levels deeper than the current line's depth.
     yield* closeLevels(buf, openStack, depth);
 
-    // If marker type changed at an existing depth, close back to that point
-    // and reopen with the new type. Example: `* A\n# B` at depth 1 switches
-    // from bullet to ordered.
-    if (openStack.length > 0 && openStack.length <= depth) {
-      const topIdx = openStack.length - 1;
-      if (openStack[topIdx].marker_char !== markers[topIdx]) {
-        yield* closeLevels(buf, openStack, topIdx);
+    // If any shared depth changes list wrapper meaning, close back to the
+    // first incompatible depth and reopen from there. This keeps `;` and `:`
+    // inside one definition-list wrapper while still splitting `*` and `#`
+    // into different list wrappers.
+    const sharedDepth = Math.min(openStack.length, depth);
+    for (let i = 0; i < sharedDepth; i++) {
+      const nextLevel = markerToLevel(markers[i]);
+      if (!canReuseListLevel(openStack[i].level, nextLevel)) {
+        yield* closeLevels(buf, openStack, i);
+        break;
       }
     }
 
@@ -886,13 +974,9 @@ function* closeLevels(
 
 /** Convert a list marker token type back into the source marker character. */
 function tokenToMarkerChar(type: TokenType): string {
-  switch (type) {
-    case TokenType.BULLET: return '*';
-    case TokenType.HASH: return '#';
-    case TokenType.SEMICOLON: return ';';
-    case TokenType.COLON: return ':';
-    default: return '*';
-  }
+  return Object.hasOwn(LIST_MARKER_CHAR_LOOKUP, type)
+    ? LIST_MARKER_CHAR_LOOKUP[type]!
+    : '*';
 }
 
 // ---------------------------------------------------------------------------
@@ -1104,13 +1188,45 @@ function* parseTable(
     yield* closeRow(buf);
   }
   const endPt = pointAt(buf.tracker, source.length);
-  yield errorEvent('Unclosed table at end of input', zeroPos(endPt), {
+  if (buf.emit_diagnostics) {
+    yield unclosedTableDiagnostic(endPt);
+  }
+  yield exitEvent('table', zeroPos(endPt));
+}
+
+/**
+ * Report that the block parser reached end of input before a table closed.
+ *
+ * This happens when the source opens a table with `{|` but never reaches the
+ * matching `|}` before EOF.
+ *
+ * Example input:
+ *
+ * ```text
+ * {| class="wikitable"
+ * | Planet
+ * | Mars
+ * ```
+ *
+ * The parser still closes the table in recovery mode so downstream consumers
+ * get a usable tree. Consumers can respond in a few different ways depending
+ * on their product goals:
+ *
+ * - show a warning and keep rendering the recovered table
+ * - offer a quick fix that inserts a closing `|}`
+ * - ignore the warning in best-effort batch processing that only needs a
+ *   stable structure
+ *
+ * None of those responses is mandatory. The parser's contract is only that it
+ * records the recovery and still produces valid output.
+ */
+function unclosedTableDiagnostic(end: Point): WikitextEvent {
+  return errorEvent('Unclosed table at end of input', zeroPos(end), {
     severity: 'warning',
-    code: 'UNCLOSED_TABLE',
+    code: DiagnosticCode.UNCLOSED_TABLE,
     recoverable: true,
     source: 'block',
   });
-  yield exitEvent('table', zeroPos(endPt));
 }
 
 /** Parse cells on one line, handling `||` and `!!` inline separators. */
