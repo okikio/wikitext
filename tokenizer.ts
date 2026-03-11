@@ -287,6 +287,11 @@ export function* tokenize(source: TextSource): Generator<Token> {
   // This single flag carries the tokenizer's line-sensitive context. Many
   // delimiters change meaning at line start, so keeping it explicit here makes
   // the hot loop easier to reason about during debugging.
+  //
+  // `lineStart` means "the next token begins at the first meaningful column of
+  // a physical line." Some delimiter cases deliberately keep it true after
+  // emitting a marker so stacked prefixes such as `**`, `#:` or `;:` can still
+  // be recognized one character later.
   let lineStart = true;
 
   while (i < len) {
@@ -457,6 +462,11 @@ export function* tokenize(source: TextSource): Generator<Token> {
       //   pos 1: '*' at lineStart → BULLET [1,2), lineStart stays true
       //   pos 2: ' ' at lineStart → PREFORMATTED_MARKER [2,3)
       //   pos 3: 'n' → TEXT "nested item"
+      //
+      // That final space looks odd at first glance. The tokenizer is not
+      // claiming the list item is preformatted. It is only preserving the raw
+      // line-start token shape. The block parser owns the later decision about
+      // how a list prefix plus following whitespace should be interpreted.
       case CC_ASTERISK: {
         if (lineStart) {
           yield tok(TokenType.BULLET, i, i + 1);
@@ -602,6 +612,10 @@ export function* tokenize(source: TextSource): Generator<Token> {
       //    Example: "<!-- never closed" (recovery)
       //      COMMENT_OPEN [0,4), TEXT [4,17) " never closed"
       //
+      //    That recovery shape is intentional. It preserves two facts at once:
+      //    comment syntax definitely started here, and the trailing bytes still
+      //    belong to the token stream even though no `-->` arrived.
+      //
       // 2. `</` opens a closing tag (e.g., `</div>`).
       //    → CLOSING_TAG_OPEN [i,i+2)
       //
@@ -609,6 +623,11 @@ export function* tokenize(source: TextSource): Generator<Token> {
       //    (e.g., `<ref>`, `<div>`). Only the `<` itself is emitted;
       //    the tag name becomes TEXT tokens for the block parser.
       //    → TAG_OPEN [i,i+1)
+      //
+      //    This split may look surprising if you expect a single "whole tag"
+      //    token. The tokenizer stays lexical here: it only marks the raw tag
+      //    boundary shape. Later stages decide whether the following text forms
+      //    a recognized HTML-like construct in context.
       //
       // 4. Bare `<` (not followed by `!--`, `/`, or letter) is text.
       //    Example: "3 < 5" → the '<' is TEXT.
