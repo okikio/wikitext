@@ -52,26 +52,25 @@ Each stage can also be used independently:
 - `outlineEvents(input)` returns block-level events only (no inline parsing).
 - `events(input)` returns the full event stream (block + inline).
 - `parse(input)` is shorthand for `buildTree(events(input), { source: input })`.
-- `parseWithDiagnostics(input)` keeps a stricter tree plus recovery diagnostics.
-- `parseWithRecovery(input)` keeps the more aggressively recovered tree plus an explicit recovery flag and diagnostics.
+- `parseWithDiagnostics(input)` keeps the default tree plus parser diagnostics.
+- `parseStrict(input)` keeps diagnostics plus a conservative source-strict tree.
+- `parseWithRecovery(input)` keeps the default tree plus an explicit recovery flag and diagnostics.
 
-`strict` and `loose` are tree-shape policies, not parse-success policies. Both
-lanes still recover and still return a valid tree. The difference is how much
-recovered wrapper structure survives into the final tree:
-
-- `loose` keeps more inferred wrapper nodes when the parser can still form a
-  useful structure
-- `strict` keeps the diagnostics, but prefers collapsing recovery-heavy
-  wrappers back to plain text when the source did not clearly commit to them
+The main cost split is diagnostic emission. If a caller does not want
+diagnostics, the block and inline stages do not emit diagnostic events for that
+lane. If a caller does want diagnostics, they can then choose whether to keep
+the default HTML-like tree shape or ask for the more conservative
+source-strict materialization.
 
 The extra `source` argument on `buildTree()` exists because the event stream is
 range-first. Text events carry offsets, not copied strings, so the tree
 builder needs the original source to materialize `Text.value`.
 
-This means the parser's tolerance and the caller's result shape are separate
+This means parser continuation and caller-visible materialization are separate
 choices. The parser still upholds its never-throw contract, but callers can
-choose whether they want only the loose recovered tree, a stricter tree plus diagnostics, or the recovered tree plus diagnostics and
-an explicit recovery summary.
+choose whether they want only the default tree, the default tree plus
+diagnostics, a conservative tree plus diagnostics, or the default tree plus
+diagnostics and an explicit recovery summary.
 
 Those top-level APIs now exist in the codebase. Lower-level modules such as
 `TextSource`, tokens, events, AST node types/builders/guards, `tokenize()`,
@@ -87,9 +86,10 @@ work.
 createSession(source)
   ├─► outline()              -> cached block events
   ├─► events()               -> cached full events
-  ├─► parse()                -> cheap loose tree lane
-  ├─► parseWithDiagnostics() -> strict tree + diagnostics
-  └─► parseWithRecovery()    -> loose tree + diagnostics + recovered
+  ├─► parse()                -> cheap default tree lane
+  ├─► parseWithDiagnostics() -> default tree + diagnostics
+  ├─► parseStrict()          -> conservative tree + diagnostics
+  └─► parseWithRecovery()    -> default tree + diagnostics + recovered
 ```
 
 That lane split matters for performance. If a caller says they do not want
@@ -253,12 +253,27 @@ graph. The parser itself stays event-first. Tree building is a consumer step
 for callers that want random-access traversal.
 
 `buildTreeWithDiagnostics(events, { source })` runs the same materialization,
-but it also preserves recovery diagnostics that would otherwise disappear once
-the tree has been built.
+but it also preserves diagnostics that would otherwise disappear once the tree
+has been built.
+
+`buildTreeStrict(events, { source })` keeps the same diagnostics, but uses the
+conservative source-strict materialization policy for malformed regions.
 
 `buildTreeWithRecovery(events, { source })` adds one more summary field,
 `recovered`, for consumers that want to branch explicitly on whether any
 recovery happened while building the final tree.
+
+These APIs are easier to reason about if you treat them as two separate
+choices:
+
+```text
+1. should diagnostics be preserved at all?
+2. if yes, which materialization policy should represent malformed regions?
+```
+
+That is a better mental model than treating each wrapper as a different parser
+truth. The parser's syntax findings stay the same. The caller is choosing how
+much malformed-but-committed structure should survive in the final tree.
 
 The conversion rule is intentionally mechanical:
 
@@ -360,6 +375,39 @@ Those helpers turn the stored child-index path back into a concrete node,
 parent, and index, so editor and lint tooling can react without reimplementing
 tree walking logic.
 
+### What callers can trust after malformed input
+
+This is the practical contract to carry into downstream code.
+
+1. Source offsets remain authoritative in every lane. If a caller needs the
+  exact source bytes, `position` and source slicing win over any convenience
+  string field.
+2. `outlineEvents()` and `events()` must agree on block structure. Inline
+  parsing may enrich text ranges, but it must not silently turn a heading into
+  a paragraph or a list into plain prose.
+3. `parse()` and `parseWithDiagnostics()` keep the default HTML-like
+  materialization. They are the right tree lanes when a caller wants a stable
+  structural overlay that still tolerates malformed committed constructs.
+4. `parseStrict()` is intentionally more conservative. It may collapse a
+  malformed region back to source-backed text, including outer wrappers that
+  only existed because tolerant recovery inferred them. It is not the lane to
+  use as the canonical structural overlay.
+5. A construct that never reaches its commitment point stays plain text in all
+  lanes. The HTML-like tag rule is the clearest example: if the opener never
+  reaches `>`, the parser does not commit a tag node and the final tree should
+  stay text-backed.
+6. A construct that did reach its commitment point may stay structurally real
+  in the default materialization and collapse in the source-strict
+  materialization. That difference is a consumer policy choice, not a parser
+  disagreement about what finding occurred.
+7. Diagnostic anchors are trustworthy only for the final tree they were built
+  against. They do not yet promise edit-stable identity across later session
+  changes.
+
+Those trust rules should stay backed by tests. If a future optimization keeps
+performance but weakens one of these guarantees, that is a behavioral change,
+not a harmless refactor.
+
 
 ## Session API
 
@@ -375,7 +423,8 @@ const session = createSession(source);
 session.events();        // full event stream
 session.outline();       // block-only events (cheap structural overlay)
 session.parse();         // full AST
-session.parseWithDiagnostics(); // full AST + recovery diagnostics
+session.parseWithDiagnostics(); // default AST + diagnostics
+session.parseStrict();   // conservative AST + diagnostics
 
 // Streaming
 session.write(chunk);          // append-only streaming input
@@ -390,7 +439,8 @@ Session is built *on top of* the pipeline, not replacing it. Each tier adds
 capability without retroactive redesign:
 
 - **Core**: `createSession(source)` with `.events()`, `.outline()`,
-  `.parse()`, and `.parseWithDiagnostics()`. Caches the last parse result.
+  `.parse()`, `.parseWithDiagnostics()`, and `.parseStrict()`. Caches the last
+  parse result.
 - **Streaming**: `.write(chunk)` for append-only streaming,
   `.drainStableEvents()` for stable prefix consumption.
 - **Incremental**: `.applyChanges(edits)` with incremental reparse, edit
