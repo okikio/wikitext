@@ -72,7 +72,9 @@
 import type { TextSource } from './text_source.ts';
 import type { Point, Position, TextEvent, WikitextEvent } from './events.ts';
 import {
+  DiagnosticCode,
   enterEvent,
+  errorEvent,
   exitEvent,
   textEvent,
 } from './events.ts';
@@ -170,6 +172,29 @@ interface TextGroupContext {
   start_point: Point;
   /** Absolute offsets where each logical line in this text group begins. */
   line_starts: number[];
+  /** Whether inline recovery should emit diagnostic events. */
+  include_diagnostics: boolean;
+  /**
+  * Whether recoverable inline constructs should stay loose or strict.
+   *
+   * `loose` keeps recovered wrapper structure when an opener was real but a
+   * closer never arrived. `strict` keeps the diagnostic but collapses the
+   * same region back to plain text.
+   */
+  recovery_style: 'loose' | 'strict';
+}
+
+/**
+ * Internal switches for one inline-enrichment lane.
+ *
+ * These mirror the public parse lanes so the inline parser does not do extra
+ * diagnostic work when the caller only wanted the cheap loose tree.
+ */
+interface InlineEventOptions {
+  /** Whether inline-stage recovery should emit diagnostic events. */
+  readonly include_diagnostics?: boolean;
+  /** Whether recoverable inline constructs stay structurally loose or strict. */
+  readonly recovery_style?: 'loose' | 'strict';
 }
 
 /**
@@ -193,6 +218,8 @@ interface SpecialMatch {
  * matching can stay case-insensitive without reslicing repeatedly.
  */
 interface TagOpen {
+  /** Discriminant for successful opener recognition. */
+  kind: 'parsed';
   /** Tag name exactly as it appeared in source. */
   tag_name: string;
   /** Lowercased tag name used for comparisons. */
@@ -203,6 +230,23 @@ interface TagOpen {
   self_closing: boolean;
   /** Parsed attributes when the tag carried any. */
   attributes?: Readonly<Record<string, string>>;
+}
+
+/**
+ * A plausible tag opener that never reached its closing `>`.
+ *
+ * This is the boundary between "the source definitely opened a tag" and
+ * "the source only looked like it might start one". The inline parser uses
+ * this shape to preserve the original bytes as text while still reporting a
+ * recovery diagnostic.
+ */
+interface UnterminatedTagOpen {
+  /** Discriminant for opener recovery before any tag node is committed. */
+  kind: 'unterminated';
+  /** Tag name exactly as it appeared before EOF or range end. */
+  tag_name: string;
+  /** Lowercased tag name used for diagnostics. */
+  tag_name_lower: string;
 }
 
 /** Parsed shape of a closing HTML-like tag such as `</span>`. */
@@ -234,6 +278,7 @@ interface TagBoundary {
 export function* inlineEvents(
   source: TextSource,
   events: Iterable<WikitextEvent>,
+  options: InlineEventOptions = {},
 ): Generator<WikitextEvent> {
   let pending_text: TextEvent[] = [];
 
@@ -249,7 +294,7 @@ export function* inlineEvents(
         pending_text.length > 0 &&
         pending_text[pending_text.length - 1].end_offset !== event.start_offset
       ) {
-        yield* parseTextGroup(source, pending_text);
+        yield* parseTextGroup(source, pending_text, options);
         pending_text = [];
       }
 
@@ -258,7 +303,7 @@ export function* inlineEvents(
     }
 
     if (pending_text.length > 0) {
-      yield* parseTextGroup(source, pending_text);
+      yield* parseTextGroup(source, pending_text, options);
       pending_text = [];
     }
 
@@ -266,7 +311,7 @@ export function* inlineEvents(
   }
 
   if (pending_text.length > 0) {
-    yield* parseTextGroup(source, pending_text);
+    yield* parseTextGroup(source, pending_text, options);
   }
 }
 
@@ -296,6 +341,7 @@ export function* inlineEvents(
 function* parseTextGroup(
   source: TextSource,
   events: TextEvent[],
+  options: InlineEventOptions,
 ): Generator<WikitextEvent> {
   const first = events[0];
   const last = events[events.length - 1];
@@ -325,15 +371,26 @@ function* parseTextGroup(
     return;
   }
 
-  const ctx = createTextGroupContext(
+  const ctx = buildTextGroupContext(
     source,
     first.start_offset,
     last.end_offset,
     first.position.start,
   );
+  ctx.include_diagnostics = options.include_diagnostics !== false;
+  ctx.recovery_style = options.recovery_style ?? 'loose';
 
   yield* parseInlineRange(ctx, ctx.start_offset, ctx.end_offset, true);
 }
+
+/**
+ * Parse one merged inline text range from left to right.
+ *
+ * The key invariant here is that `plain_start` always marks the beginning of
+ * the next still-unemitted plain-text run. When a matcher recognizes a real
+ * inline construct, the parser first flushes the plain text before it, then
+ * emits the construct events, then resumes scanning after the construct.
+ */
 
 /**
  * Parse one absolute source range.
@@ -925,6 +982,12 @@ function matchTagLike(
 
   const tag = parseTagOpen(ctx.source, cursor, end_offset);
   if (tag === null) return null;
+  if (tag.kind === 'unterminated') {
+    return {
+      end_offset,
+      events: preserveUnterminatedTagOpenerAsText(ctx, cursor, end_offset, tag.tag_name),
+    };
+  }
 
   if (tag.tag_name_lower === 'br') {
     return {
@@ -942,7 +1005,21 @@ function matchTagLike(
     }
 
     const close = findMatchingCloseTag(ctx.source, tag, tag.end_offset, end_offset);
-    if (close === null) return null;
+    if (close === null) {
+      return {
+        end_offset,
+        events: ctx.recovery_style === 'strict'
+          ? preserveMissingCloseTagAsText(ctx, cursor, end_offset, tag.tag_name)
+          : wrapRecoveredLeaf(
+            ctx,
+            cursor,
+            end_offset,
+            'nowiki',
+            { value: ctx.source.slice(tag.end_offset, end_offset) },
+            tag.tag_name,
+          ),
+      };
+    }
     return {
       end_offset: close.end_offset,
       events: wrapLeaf(ctx, cursor, close.end_offset, 'nowiki', {
@@ -961,7 +1038,24 @@ function matchTagLike(
     }
 
     const close = findMatchingCloseTag(ctx.source, tag, tag.end_offset, end_offset);
-    if (close === null) return null;
+    if (close === null) {
+      return {
+        end_offset,
+        events: ctx.recovery_style === 'strict'
+          ? preserveMissingCloseTagAsText(ctx, cursor, end_offset, tag.tag_name)
+          : createRecoveredWrappedInlineEvents(
+            ctx,
+            cursor,
+            end_offset,
+            'reference',
+            ref_props,
+            tag.end_offset,
+            end_offset,
+            true,
+            tag.tag_name,
+          ),
+      };
+    }
     return {
       end_offset: close.end_offset,
       events: createWrappedInlineEvents(
@@ -989,7 +1083,24 @@ function matchTagLike(
   }
 
   const close = findMatchingCloseTag(ctx.source, tag, tag.end_offset, end_offset);
-  if (close === null) return null;
+  if (close === null) {
+    return {
+      end_offset,
+      events: ctx.recovery_style === 'strict'
+        ? preserveMissingCloseTagAsText(ctx, cursor, end_offset, tag.tag_name)
+        : createRecoveredWrappedInlineEvents(
+          ctx,
+          cursor,
+          end_offset,
+          'html-tag',
+          html_props,
+          tag.end_offset,
+          end_offset,
+          true,
+          tag.tag_name,
+        ),
+    };
+  }
   return {
     end_offset: close.end_offset,
     events: createWrappedInlineEvents(
@@ -1030,8 +1141,12 @@ function matchTagLike(
  * Later, if we need the point for offset 6, we only need to find the most
  * recent line start at or before 6. That is enough to recover line 3,
  * column 2, offset 6.
+ *
+ * The important boundary here is that this table is local to one merged text
+ * group, not the whole document. That keeps the setup cost proportional to the
+ * exact range the inline parser is about to scan.
  */
-function createTextGroupContext(
+function buildTextGroupContext(
   source: TextSource,
   start_offset: number,
   end_offset: number,
@@ -1056,12 +1171,36 @@ function createTextGroupContext(
     cursor++;
   }
 
-  return { source, start_offset, end_offset, start_point, line_starts };
+  return {
+    source,
+    start_offset,
+    end_offset,
+    start_point,
+    line_starts,
+    include_diagnostics: true,
+    recovery_style: 'loose',
+  };
 }
 
 const EMPTY_SEPARATOR_LIST: readonly number[] = [];
 
-/** Emit one plain-text event for the given absolute source range. */
+/**
+ * Emit one plain-text event for the given absolute source range.
+ *
+ * This helper is small, but it exists for one reason: plain text emission in
+ * this file is deliberately deferred. Several matchers keep scanning until they
+ * know exactly where a plain run ends, then call this helper once with the
+ * final range.
+ *
+ * Example:
+ *
+ * ```text
+ * source: "Hello [[Mars]] world"
+ *
+ * emitText(..., 0, 6)   -> "Hello "
+ * emitText(..., 14, 20) -> " world"
+ * ```
+ */
 function emitText(
   ctx: TextGroupContext,
   start_offset: number,
@@ -1088,7 +1227,13 @@ function wrapLeaf(
   return [enterEvent(node_type, props, position), exitEvent(node_type, position)];
 }
 
-/** Append a nested inline parse directly into an existing event array. */
+/**
+ * Append a nested inline parse directly into an existing event array.
+ *
+ * This is the shared "parse children here" helper for templates, links,
+ * references, and emphasis. Keeping the append shape explicit avoids building
+ * temporary arrays only to spread them immediately into a parent event list.
+ */
 function appendInlineRange(
   events: WikitextEvent[],
   ctx: TextGroupContext,
@@ -1119,7 +1264,98 @@ function createWrappedInlineEvents(
   return events;
 }
 
-/** Create a full `Position` object for one absolute source range. */
+/**
+ * Create a wrapped inline node that recovers to the end of the current text range.
+ *
+ * The opener already reached `>`, so the node is structurally real even though
+ * the matching close tag never arrived before the enclosing text group ended.
+ */
+function createRecoveredWrappedInlineEvents(
+  ctx: TextGroupContext,
+  start_offset: number,
+  end_offset: number,
+  node_type: string,
+  props: Readonly<Record<string, unknown>>,
+  content_start: number,
+  content_end: number,
+  allow_bare_url: boolean,
+  tag_name: string,
+): WikitextEvent[] {
+  const events = createWrappedInlineEvents(
+    ctx,
+    start_offset,
+    end_offset,
+    node_type,
+    props,
+    content_start,
+    content_end,
+    allow_bare_url,
+  );
+  if (ctx.include_diagnostics) {
+    events.splice(events.length - 1, 0, missingCloseTagError(ctx, end_offset, tag_name));
+  }
+  return events;
+}
+
+/**
+ * Wrap a leaf node that had a complete opener but no matching close tag.
+ */
+function wrapRecoveredLeaf(
+  ctx: TextGroupContext,
+  start_offset: number,
+  end_offset: number,
+  node_type: string,
+  props: Readonly<Record<string, unknown>>,
+  tag_name: string,
+): WikitextEvent[] {
+  const position = createPosition(ctx, start_offset, end_offset);
+  const events: WikitextEvent[] = [enterEvent(node_type, props, position)];
+  if (ctx.include_diagnostics) {
+    events.push(missingCloseTagError(ctx, end_offset, tag_name));
+  }
+  events.push(exitEvent(node_type, position));
+  return events;
+}
+
+/**
+ * Preserve an unterminated opener as plain text while still reporting recovery.
+ */
+function preserveUnterminatedTagOpenerAsText(
+  ctx: TextGroupContext,
+  start_offset: number,
+  end_offset: number,
+  tag_name: string,
+): WikitextEvent[] {
+  const events: WikitextEvent[] = [];
+  if (ctx.include_diagnostics) {
+    events.push(unterminatedTagOpenerError(ctx, end_offset, tag_name));
+  }
+  events.push(emitText(ctx, start_offset, end_offset));
+  return events;
+}
+
+function preserveMissingCloseTagAsText(
+  ctx: TextGroupContext,
+  start_offset: number,
+  end_offset: number,
+  tag_name: string,
+): WikitextEvent[] {
+  const events: WikitextEvent[] = [];
+  if (ctx.include_diagnostics) {
+    events.push(missingCloseTagError(ctx, end_offset, tag_name));
+  }
+  events.push(emitText(ctx, start_offset, end_offset));
+  return events;
+}
+
+/**
+ * Create a full `Position` object for one absolute source range.
+ *
+ * This is the point where the inline parser pays the position-construction
+ * cost. Upstream code carries offsets and a compact line-start table for as
+ * long as possible, then this helper materializes the nested `{ start, end }`
+ * shape only when an event is about to be emitted.
+ */
 function createPosition(
   ctx: TextGroupContext,
   start_offset: number,
@@ -1167,7 +1403,22 @@ function pointAt(ctx: TextGroupContext, offset: number): Point {
   };
 }
 
-/** Find the last recorded line start at or before `offset`. */
+/**
+ * Find the last recorded line start at or before `offset`.
+ *
+ * This is a binary search over the local `line_starts` table from
+ * {@linkcode createTextGroupContext}. The returned index answers one concrete
+ * question: which logical line of this text group owns the requested offset?
+ *
+ * Example with `line_starts = [0, 6, 11]`:
+ *
+ * ```text
+ * offset 2  -> index 0  (first line)
+ * offset 6  -> index 1  (second line starts here)
+ * offset 10 -> index 1  (still second line)
+ * offset 12 -> index 2  (third line)
+ * ```
+ */
 function lineIndexAt(line_starts: number[], offset: number): number {
   let low = 0;
   let high = line_starts.length - 1;
@@ -1192,6 +1443,20 @@ function lineIndexAt(line_starts: number[], offset: number): number {
  *
  * The returned offset is the exclusive end of the closing delimiter. `-1`
  * means the construct never closed cleanly inside the requested range.
+ *
+ * This helper handles nested forms of the same container kind. For example,
+ * the outer `{{...}}` in `{{A|x={{B}}}}` must not close at the inner `}}`.
+ *
+ * Read the depth rule like this:
+ *
+ * ```text
+ * see opener -> depth + 1
+ * see closer -> depth - 1
+ * return when depth returns to 0
+ * ```
+ *
+ * The helper is intentionally narrow. It only balances one opener/closer pair
+ * family at a time, which keeps it predictable on the hot recovery path.
  */
 function findBalanced(
   source: TextSource,
@@ -1235,6 +1500,16 @@ function findBalanced(
  *
  * Example: in `{{A|x={{B|y}}|z}}`, the outer template has two top-level `|`
  * separators even though there is another `|` inside the nested `{{B|y}}`.
+ *
+ * The three depth counters model the nested container families that matter for
+ * argument splitting here:
+ *
+ * - `[[...]]`
+ * - `{{...}}`
+ * - `{{{...}}}`
+ *
+ * A separator only counts when all three depths are zero. That is what
+ * "top-level" means in this file.
  */
 function topLevelSeparators(
   source: TextSource,
@@ -1303,7 +1578,13 @@ function topLevelSeparators(
   return result;
 }
 
-/** Find only the first top-level separator without allocating an array. */
+/**
+ * Find only the first top-level separator without allocating an array.
+ *
+ * This exists because many call sites only need a yes-or-no split point for
+ * the head of a construct, such as the first `|` in a template name/body pair.
+ * In those cases, allocating the full separator list would be wasted work.
+ */
 function firstTopLevelSeparator(
   source: TextSource,
   start_offset: number,
@@ -1370,7 +1651,17 @@ function firstTopLevelSeparator(
   return -1;
 }
 
-/** Find the first top-level `=` inside a range, if any. */
+/**
+ * Find the first top-level `=` inside a range, if any.
+ *
+ * Template arguments use this to distinguish positional and named arguments:
+ *
+ * ```text
+ * value        -> no top-level `=` -> positional argument
+ * key=value    -> top-level `=`    -> named argument
+ * key={{A=B}}  -> inner `=` ignored because it is nested
+ * ```
+ */
 function topLevelEquals(
   source: TextSource,
   start_offset: number,
@@ -1379,7 +1670,13 @@ function topLevelEquals(
   return firstTopLevelSeparator(source, start_offset, end_offset, CC_EQUALS);
 }
 
-/** Trim ASCII space, tab, and line-break padding around a source range. */
+/**
+ * Trim ASCII space, tab, and line-break padding around a source range.
+ *
+ * This is used for structural fields such as names and targets, where outer
+ * padding is usually not meaningful syntax. It does not rewrite the underlying
+ * source. It only returns a narrower view into the same offsets.
+ */
 function trimRange(
   source: TextSource,
   start_offset: number,
@@ -1403,7 +1700,12 @@ function trimRange(
   return { start, end };
 }
 
-/** Convert a `{ start, end }` range object into a tuple for `slice()`. */
+/**
+ * Convert a `{ start, end }` range object into a tuple for `slice()`.
+ *
+ * This helper is tiny, but it keeps the call sites readable where trimming and
+ * slicing are chained together.
+ */
 function rangeTuple(range: { start: number; end: number }): [number, number] {
   return [range.start, range.end];
 }
@@ -1438,16 +1740,30 @@ function findApostropheClose(
 /**
  * Parse one opening HTML-like tag.
  *
- * This helper is intentionally permissive about attributes because the parser's
- * job is to recover structure from source text, not to enforce a full HTML
- * validator. If the tag opener never reaches `>`, we return `null` and let the
- * caller fall back to plain text.
+ * This helper follows a permissive, HTML-like scanning rule inside the opener.
+ * Its job is to keep consuming attribute territory until the opener either
+ * reaches `>` or the current text range ends. It does not require attribute
+ * syntax to be clean before it will keep scanning.
+ *
+ * The recognition boundary is still the closing `>` of the opener.
+ *
+ * ```text
+ * <ref name="x">body</ref>   -> recognized tag pair
+ * <ref foo<div>>body</ref>    -> recognized opener despite malformed attrs
+ * <ref name="x">body         -> opener is real, later recovery handles missing close
+ * <ref name="x"              -> opener never closed, preserve as text
+ * ```
+ *
+ * This is a recovery policy for wikitext-like parsing, not a byte-for-byte
+ * HTML tokenizer. The important contract is simpler: be forgiving while
+ * scanning the opener, but only promote text into tag structure after `>` has
+ * actually been seen.
  */
 function parseTagOpen(
   source: TextSource,
   start_offset: number,
   end_offset: number,
-): TagOpen | null {
+): TagOpen | UnterminatedTagOpen | null {
   if (source.charCodeAt(start_offset) !== CC_LT) return null;
   let cursor = start_offset + 1;
   if (cursor >= end_offset || !isTagNameStart(source.charCodeAt(cursor))) return null;
@@ -1458,6 +1774,7 @@ function parseTagOpen(
   const name_end = cursor;
 
   let quote = 0;
+  let nested_angle_depth = 0;
   let self_closing = false;
   while (cursor < end_offset) {
     const code = source.charCodeAt(cursor);
@@ -1471,11 +1788,24 @@ function parseTagOpen(
       cursor++;
       continue;
     }
+    if (code === CC_LT) {
+      nested_angle_depth++;
+      self_closing = false;
+      cursor++;
+      continue;
+    }
     if (code === CC_GT) {
+      if (nested_angle_depth > 0) {
+        nested_angle_depth--;
+        self_closing = false;
+        cursor++;
+        continue;
+      }
       const attr_end = self_closing ? cursor - 1 : cursor;
       const tag_name = source.slice(name_start, name_end);
       const attributes = parseAttributes(source, name_end, attr_end);
       return {
+        kind: 'parsed',
         tag_name,
         tag_name_lower: tag_name.toLowerCase(),
         end_offset: cursor + 1,
@@ -1483,11 +1813,16 @@ function parseTagOpen(
         attributes,
       };
     }
-    self_closing = code === CC_SLASH;
+    self_closing = nested_angle_depth === 0 && code === CC_SLASH;
     cursor++;
   }
 
-  return null;
+  const tag_name = source.slice(name_start, name_end);
+  return {
+    kind: 'unterminated',
+    tag_name,
+    tag_name_lower: tag_name.toLowerCase(),
+  };
 }
 
 /** Parse one closing HTML-like tag such as `</span>`. */
@@ -1562,7 +1897,11 @@ function findMatchingCloseTag(
     }
 
     const nested_open = parseTagOpen(source, cursor, end_offset);
-    if (nested_open !== null && nested_open.tag_name_lower === open_tag.tag_name_lower) {
+    if (
+      nested_open !== null &&
+      nested_open.kind === 'parsed' &&
+      nested_open.tag_name_lower === open_tag.tag_name_lower
+    ) {
       if (!nested_open.self_closing) depth++;
       cursor = nested_open.end_offset;
       continue;
@@ -1646,6 +1985,49 @@ function parseAttributes(
   }
 
   return result;
+}
+
+/** Build a zero-width diagnostic position at one absolute source offset. */
+function zeroWidthPosition(ctx: TextGroupContext, offset: number): Position {
+  return createPosition(ctx, offset, offset);
+}
+
+/** Report that a plausible HTML-like opener never reached its closing `>`. */
+function unterminatedTagOpenerError(
+  ctx: TextGroupContext,
+  offset: number,
+  tag_name: string,
+): WikitextEvent {
+  return errorEvent(
+    `Unterminated <${tag_name}> opener before end of inline range.`,
+    zeroWidthPosition(ctx, offset),
+    {
+      severity: 'warning',
+      code: DiagnosticCode.INLINE_TAG_UNTERMINATED_OPENER,
+      recoverable: true,
+      source: 'inline',
+      details: { tag_name },
+    },
+  );
+}
+
+/** Report that a parsed opener never found its matching close tag. */
+function missingCloseTagError(
+  ctx: TextGroupContext,
+  offset: number,
+  tag_name: string,
+): WikitextEvent {
+  return errorEvent(
+    `Missing closing </${tag_name}> before end of inline range.`,
+    zeroWidthPosition(ctx, offset),
+    {
+      severity: 'warning',
+      code: DiagnosticCode.INLINE_TAG_MISSING_CLOSE,
+      recoverable: true,
+      source: 'inline',
+      details: { tag_name },
+    },
+  );
 }
 
 /** Reduce raw tag attributes to the public reference-node props we expose. */
