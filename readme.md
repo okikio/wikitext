@@ -61,6 +61,13 @@ progress:
 - lazy tree-building mode
 - `parseChunked()`
 
+If you want the deeper design and architecture notes, start with
+[docs/architecture/README.md](./docs/architecture/README.md).
+
+If you want compact API tables, see [docs/api-reference.md](./docs/api-reference.md).
+
+If you want more task-focused usage snippets, see [docs/examples.md](./docs/examples.md).
+
 ## Quick start
 
 ```ts
@@ -143,7 +150,52 @@ TokenType.TEXT;                // 'TEXT'
 isToken({ type: TokenType.TEXT, start: 0, end: 5 }); // true
 ```
 
-## Architecture
+## How to think about the parser
+
+The package is easier to use if you start with the big ideas first.
+
+The parser is event-stream-first. It notices raw syntax, turns that into
+structured events, and then lets trees and other tools consume that same event
+stream.
+
+```text
+Input -> Tokenizer -> Event Stream -> [Consumer]
+```
+
+That is why the package exposes more than one level of output:
+
+- `tokens()` when you want the cheapest inspection path
+- `outlineEvents()` when you only care about block structure
+- `events()` when you want the full structural stream
+- tree builders when you want a random-access result
+
+The package is also utility-first. It is meant to give you stable primitives to
+build on, not a giant hook surface that asks you to patch the parser from the
+inside.
+
+If you need domain-specific behavior, the usual recommendation is:
+
+1. consume tokens or events
+2. write a small focused parser or transformer for your domain
+3. emit your own events, summaries, or later tree shape on top of those
+  primitives
+
+That keeps the core parser predictable while still giving downstream tooling a
+real extension model.
+
+Malformed input is part of that story too. The parser never throws on arbitrary
+input, but callers should still get to choose what kind of help they want. Some
+callers want the fastest tree. Some want the parser to recover on their behalf
+and explain what it fixed. Some want a more diagnostics-first model where the
+parser surfaces problems without already deciding all the repairs for them.
+
+If you want the full plain-English version of that choice, see
+[docs/architecture/choosing-a-tree.md](./docs/architecture/choosing-a-tree.md).
+
+If you want the longer explanation for why the parser does not lead with deep
+hooks, see [docs/architecture/utility-first.md](./docs/architecture/utility-first.md).
+
+## Architecture at a glance
 
 ```
 Input ──► Tokenizer ──► Event Stream ──► [Consumer]
@@ -161,7 +213,10 @@ lowest-cost consumers (search, grep). The event stream adds structure
 (enter/exit pairs). The tree builder, HTML compiler, and filter utilities are all
 event consumers.
 
-## HTML-like tag recovery
+For the deeper architecture breakdown, see
+[docs/architecture/README.md](./docs/architecture/README.md).
+
+## One concrete parser rule: HTML-like tag commitment
 
 HTML-like and extension-like tags use one simple commitment rule: the parser
 only materializes a tag node after the opener reaches `>`.
@@ -188,12 +243,26 @@ hard boundary is still the closing `>` of the opener. That keeps the parser
 forgiving without inventing half-built tag nodes that the source never fully
 committed to.
 
-## Recovery APIs
+## Choosing a result
 
-The parser always preserves a usable result. The primary malformed-input choice
-is whether you want diagnostics emitted at all. If you do, you can then choose
-whether to keep the default HTML-like materialization or request the more
-conservative source-strict tree.
+The parser is trying to support three high-level families of result.
+
+```text
+fast tree
+  no diagnostics
+  no applied recovery policy
+
+recovery tree
+  diagnostics kept
+  recoveries applied on your behalf
+
+diagnostics-first tree
+  diagnostics kept
+  recoveries listed, not applied
+```
+
+Today's public wrappers are still converging toward that model, but this is the
+rough current shape:
 
 - `parse(input)` returns the default tree only
 - `parseWithDiagnostics(input)` returns `{ tree, diagnostics }` with the same
@@ -201,12 +270,16 @@ conservative source-strict tree.
 - `parseStrict(input)` returns `{ tree, diagnostics }` with a conservative tree
   that collapses recovery-heavy wrappers back to plain text when the source did
   not clearly commit to them
-- `parseWithRecovery(input)` returns `{ tree, recovered, diagnostics }` with
-  the same default tree shape as `parseWithDiagnostics(input)` plus an explicit
-  summary field
+- `parseWithRecovery(input)` stays in the same recovery-tree family today
 
-That gives you a cheap lane, a diagnostics-first lane, a conservative
-materialization lane, and an explicit recovery-summary lane:
+The key decision is not just "do I want a tree?" It is "what kind of help do I
+want from the parser when the source gets messy?"
+
+If you want the fuller explanation, including what kind of magic each tree
+family should and should not perform, see
+[docs/architecture/choosing-a-tree.md](./docs/architecture/choosing-a-tree.md).
+
+Today's wrappers look like this in code:
 
 ```ts
 const tree = parse(source);
@@ -226,197 +299,10 @@ if (result.recovered) {
 The same split exists on sessions through `session.parseWithDiagnostics()`,
 `session.parseStrict()`, and `session.parseWithRecovery()`.
 
-One important nuance: `parseStrict()` is the conservative tree lane, not a full
-"I will decide every recovery later" lane. It still chooses a final tree policy
-for the caller. A stronger diagnostics-first mode where findings and candidate
-recoveries are exposed before final materialization is still a future design
-question rather than a current public API.
-
 For event streams, diagnostics are opt-in. `events(input)` and
 `outlineEvents(input)` stay on the cheapest lane by default. Pass
 `{ include_diagnostics: true }` when you want parser findings preserved in the
 stream.
-
-## Performance invariants
-
-The parser's recent performance work follows one rule: remove repeated work
-without changing the source ranges the parser reports.
-
-In practical terms, that means these optimizations are allowed:
-
-- coalescing adjacent block-parser text events into larger contiguous ranges
-- skipping inline rescans when a merged text group contains no possible inline
-  opener
-- avoiding temporary arrays or closures in hot parser paths
-- using null-prototype object lookups for fixed parser vocabularies where the
-  code only needs O(1) membership or value mapping
-
-These optimizations are not allowed to:
-
-- trim real user content that still belongs to a block
-- rewrite spacing inside ordinary text ranges
-- remove structural boundaries such as table-cell separators
-- make block parsing depend on inline meaning
-
-The most important example is the handoff from `blockEvents()` to
-`inlineEvents()`. The block parser now tries to emit one larger text range for
-contiguous prose instead of many tokenizer-sized fragments. That helps because
-the inline parser only cares about accurate source coverage, not the old token
-boundaries, so the pipeline avoids splitting text only to merge it again one
-stage later.
-
-Another example is the inline plain-text fast path. If a merged text group has
-no possible opener such as `[[`, `{{`, `''`, `<`, `&`, `__`, or `~~~`, the
-inline parser can return the same text range directly instead of rebuilding
-line tables and rescanning bytes that will stay plain text anyway.
-
-The same idea applies to a few fixed parser vocabularies such as token-type
-membership and small marker maps. In those spots the code now uses
-null-prototype objects plus `Object.hasOwn(...)` instead of `Set` or repeated
-mapping switches. That is a targeted performance optimization, not a blanket
-style rule. The object acts like a compact lookup table, `Object.create(null)`
-removes inherited prototype properties such as `toString`, and
-`Object.hasOwn(...)` makes the check explicit: only keys we put in the table
-count as matches.
-
-The main cost that still remains is eager `position` construction. Every event
-currently carries nested start and end points with line, column, and offset
-data. That is useful for downstream tools, but it is not free. The benchmark
-work in `mod_bench.ts` isolates that cost so performance discussions can stay
-grounded in measured behavior instead of guesswork.
-
-## Tree diagnostics
-
-`parse()` still returns only the tree. That is the smallest, easiest API for
-callers that only want document structure.
-
-When a caller also needs parser findings, use `parseWithDiagnostics()` or
-`buildTreeWithDiagnostics()`. Those APIs return the default tree plus a
-`diagnostics` array. If the caller wants a more conservative tree shape, use
-`parseStrict()` or `buildTreeStrict()` instead.
-
-Each diagnostic carries an `anchor`. Today that anchor is intentionally narrow:
-it is a tree-path snapshot to the nearest materialized node around the
-recovery point.
-
-```text
-root
-├─ paragraph        path [0]
-│  └─ bold          path [0, 0]
-└─ table            path [1]
-```
-
-That keeps the AST itself focused on document meaning while still giving
-editor, lint, and inspection tools a concrete route from a diagnostic back to
-the tree.
-
-If the caller wants that route as a helper instead of rebuilding it manually,
-use `resolveDiagnosticAnchor(tree, diagnostic.anchor)` or
-`locateDiagnostic(tree, diagnostic)`.
-
-That tree-path anchor is not the future edit-stable anchor API. Session-backed
-anchor identity, slot semantics, and cross-edit stability depend on later edit
-tracking work, so they are intentionally not public yet.
-
-## Export policy
-
-The package tries to stay utility-first for downstream tooling. In practice,
-that means consumer-facing data shapes and helpers are public, while parser
-implementation scaffolding stays private until there is a stable reason to
-support it.
-
-Public and intended for downstream use:
-
-- source abstractions such as `TextSource`
-- token, event, and AST interfaces and unions
-- builder functions and type guards
-- parser stage entry points such as `tokenize()`, `blockEvents()`, and `inlineEvents()`
-
-Not public yet, and intentionally treated as internal:
-
-- scanner-local context objects
-- matcher result records used only inside one parser stage
-- low-level recovery helpers whose contracts are still evolving
-
-That boundary matters because utility-first does not mean exporting every local
-implementation detail. It means exporting the shapes and helpers that other
-tools can build on safely without coupling themselves to one parser pass's
-current internals.
-
-### Pipeline modules
-
-| Module | Purpose | Status |
-|--------|---------|--------|
-| `text_source.ts` | Abstracts the backing text store (string, rope, CRDT) | Published |
-| `token.ts` | Token type constants and `Token` interface | Published |
-| `events.ts` | Event stream types, constructors, and type guards | Published |
-| `ast.ts` | Wikist AST node types, type guards, and builders | Published |
-| `tokenizer.ts` | `charCodeAt` generator scanner over `TextSource` | Published |
-| `block_parser.ts` | Block-level event emitter | Published |
-| `inline_parser.ts` | Inline event enrichment | Published |
-| `parse.ts` | Orchestration (tokenizer, block, inline, tree) | Published |
-| `tree_builder.ts` | `buildTree(events, { source })` to `WikistRoot` | Published |
-| `stringify.ts` | AST to wikitext (round-trip) | Not yet implemented |
-| `filter.ts` | Filter/visit for tree and event streams | Published |
-| `session.ts` | Stateful `Session` wrapper for repeated sync access | Published |
-
-## API
-
-### Parsing and serialization
-
-| Function | Description |
-|----------|-------------|
-| `parse(input)` | Parse wikitext into a `WikistRoot` AST. **Available now.** |
-| `parseWithDiagnostics(input)` | Parse to `{ tree, diagnostics }` with the default HTML-like materialization. **Available now.** |
-| `parseStrict(input)` | Parse to `{ tree, diagnostics }` with the conservative source-strict materialization. **Available now.** |
-| `stringify(tree)` | Serialize a wikist tree back to wikitext. _Not yet implemented._ |
-| `events(input)` | Full event stream (block + inline). **Available now.** |
-| `outlineEvents(input)` | Block-only event stream (no inline parsing). **Available now.** |
-| `parseChunked(chunks)` | Progressive completed block nodes (async). _Not yet implemented._ |
-
-### Low-level streams
-
-| Function | Description |
-|----------|-------------|
-| `tokenize(input)` | Raw token generator stream. **Available now.** |
-| `tokens(input)` | Raw token generator alias for the sync public API. **Available now.** |
-| `blockEvents(source, tokens)` | Block-level event stream from tokens. **Available now.** |
-| `inlineEvents(source, blockEvents)` | Inline event enrichment over block events. **Available now.** |
-| `buildTree(events, { source })` | Build AST from an event iterable plus source. **Available now.** |
-| `buildTreeWithDiagnostics(events, { source })` | Build `{ tree, diagnostics }` with the default HTML-like materialization. **Available now.** |
-| `buildTreeStrict(events, { source })` | Build `{ tree, diagnostics }` with the conservative source-strict materialization. **Available now.** |
-
-### Tree utilities
-
-| Function | Description |
-|----------|-------------|
-| `filter(tree, type)` | Get all nodes of a type (recursive). **Available now.** |
-| `visit(tree, visitor)` | Pre-order tree walker. **Available now.** |
-| `resolveTreePath(tree, path)` | Resolve a root-relative child-index path back to a node. **Available now.** |
-| `resolveDiagnosticAnchor(tree, anchor)` | Resolve a diagnostic anchor back to the nearest node. **Available now.** |
-| `locateDiagnostic(tree, diagnostic)` | Resolve a diagnostic's `anchor` back to the nearest node. **Available now.** |
-| `createSession(source)` | Cached sync wrapper for `outline()`, `events()`, `parse()`, `parseWithDiagnostics()`, and `parseStrict()`. **Available now.** |
-
-### Foundation (available now)
-
-| Export | Module | Description |
-|--------|--------|-------------|
-| `TextSource` | `text_source.ts` | Interface for backing text stores |
-| `slice()` | `text_source.ts` | Resolve offset range to string |
-| `TokenType` | `token.ts` | Constant map of all token types |
-| `Token` | `token.ts` | Token interface (type + start/end offsets) |
-| `isToken()` | `token.ts` | Type guard for Token validation |
-| `tokenize()` | `tokenizer.ts` | Generator-based charCodeAt scanner |
-| `blockEvents()` | `block_parser.ts` | Block-level event generator from tokens |
-| `EnterEvent`, `ExitEvent`, `TextEvent`, `TokenEvent`, `ErrorEvent` | `events.ts` | Concrete event interfaces |
-| `WikitextEvent` | `events.ts` | Discriminated union of 5 event kinds |
-| `ErrorEventOptions`, `DiagnosticSeverity` | `events.ts` | Diagnostic support types |
-| `enterEvent()`, `exitEvent()`, ... | `events.ts` | Event constructors |
-| `isEnterEvent()`, `isExitEvent()`, ... | `events.ts` | Event type guards |
-| `WikistNode`, `WikistRoot`, `WikistNodeType` | `ast.ts` | Core AST unions and aliases |
-| `WikistParent`, `WikistLiteral`, `WikistVoid` | `ast.ts` | Structural AST category unions |
-| `root()`, `heading()`, `text()`, ... | `ast.ts` | AST builder functions |
-| `isRoot()`, `isHeading()`, `isParent()`, ... | `ast.ts` | AST type guards |
 
 ## Contributing
 
