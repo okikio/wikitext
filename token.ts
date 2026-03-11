@@ -51,7 +51,9 @@
  * `WHITESPACE`. Others mark delimiter runs such as `[[`, `{{`, `{|`,
  * or apostrophe runs used later for bold and italic parsing.
  *
- * `TokenType` is a plain `as const` object instead of a TypeScript `enum`.
+ * `TokenType` is a plain object instead of a TypeScript `enum`, then frozen at
+ * runtime.
+ *
  * That keeps the runtime shape simple and standard JavaScript friendly while
  * still giving TypeScript a literal-string union for narrowing and exhaustive
  * switching.
@@ -71,12 +73,17 @@
  * The token does not store its own string value. Consumers recover text from
  * the source with `slice(source, tok.start, tok.end)`.
  *
+ * Freezing is intentional here because token kinds are parser-owned
+ * vocabulary, not an extension registry. If a downstream tool wants extra
+ * labels, it should define its own adapter-level strings instead of mutating
+ * the tokenizer's shared constant table.
+ *
  * Keep one boundary in mind while reading these names: they describe what the
  * scanner saw, not the full meaning of the construct. For example, `[[` may
  * later become a wikilink, a category link, or a file link depending on the
  * surrounding parse rules.
  */
-export const TokenType = {
+export const TokenType = Object.freeze({
   // -- Text and whitespace --
 
   /** Literal text content (no special wiki meaning at this position). */
@@ -203,7 +210,7 @@ export const TokenType = {
 
   /** Signals end of the token stream. */
   EOF: 'EOF',
-} as const;
+} as const);
 
 /**
  * Union of all token type string literals.
@@ -214,13 +221,19 @@ export const TokenType = {
 export type TokenType = typeof TokenType[keyof typeof TokenType];
 
 /**
- * Membership set for fast runtime validation of token type strings.
+ * Membership lookup for fast runtime validation of token type strings.
  *
- * Built once so `isToken()` can avoid repeated array allocation and linear
- * scans over `Object.values(TokenType)`.
+ * `isToken()` only needs to answer one question: is this string one of the
+ * fixed token-type keys? A null-prototype object matches that use case better
+ * than a `Set`, keeps the vocabulary data explicit, strips inherited
+ * prototype properties such as `toString`, and still avoids repeated array
+ * allocation and linear scans over `Object.values(TokenType)`.
  */
-const TOKEN_TYPE_SET: ReadonlySet<string> = new Set<string>(
-  Object.values(TokenType),
+const TOKEN_TYPE_LOOKUP: Partial<Record<TokenType, true>> = Object.assign(
+  Object.create(null),
+  Object.fromEntries(
+    Object.values(TokenType).map((token_type) => [token_type, true] as const),
+  ),
 );
 
 /**
@@ -272,7 +285,9 @@ export function isToken(value: unknown): value is Token {
     typeof obj.type === 'string' &&
     typeof obj.start === 'number' &&
     typeof obj.end === 'number' &&
-    // O(1) lookup against the precomputed set of valid token type strings.
-    TOKEN_TYPE_SET.has(obj.type)
+    // O(1) lookup against the precomputed token-type vocabulary.
+    // `Object.hasOwn(...)` keeps the check on this table's own keys instead of
+    // matching something inherited through the normal object prototype chain.
+    Object.hasOwn(TOKEN_TYPE_LOOKUP, obj.type)
   );
 }
