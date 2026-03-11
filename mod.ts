@@ -17,6 +17,18 @@
  * - `tokenize()` for raw scanning
  * - `blockEvents()` for block-level structure
  * - `inlineEvents()` for inline event enrichment
+ * - `tokens()`, `outlineEvents()`, `events()`, `parse()`,
+ *   `parseWithDiagnostics()`, and `parseWithRecovery()` for orchestration
+ * - `buildTree()`, `buildTreeWithDiagnostics()`,
+ *   `buildTreeWithLooseDiagnostics()`, and `buildTreeWithRecovery()` for AST
+ *   materialization from an event stream plus source
+ * - `TreeBuildMode`, `DiagnosticCode`, and related result types for stable
+ *   parser-owned vocabularies and tree/diagnostic result shapes
+ * - `visit()`, `filter()`, `resolveTreePath()`, `resolveDiagnosticAnchor()`,
+ *   and `locateDiagnostic()` helpers for common tree and event queries
+ * - `createSession()` for cached repeated access to one source input,
+ *   including `session.parseWithDiagnostics()` and
+ *   `session.parseWithRecovery()`
  *
  * As more features land, this entry point is where they will be re-exported.
  *
@@ -38,3 +50,7 @@ export * from './ast.ts';
 export * from './tokenizer.ts';
 export * from './block_parser.ts';
 export * from './inline_parser.ts';
+export * from './tree_builder.ts';
+export * from './parse.ts';
+export * from './filter.ts';
+export * from './session.ts';
