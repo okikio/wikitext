@@ -17,9 +17,11 @@ import {
   spacing_heavy_wikitext_string,
   wikiish_string,
 } from './_test_utils/arbitraries.ts';
+import { UNICODE_TEXT_FIXTURES } from './_test_utils/unicode_fixtures.ts';
+import { DiagnosticCode } from './events.ts';
 import { tokenize } from './tokenizer.ts';
 import { blockEvents } from './block_parser.ts';
-import type { WikitextEvent, EnterEvent, ExitEvent } from './events.ts';
+import type { WikitextEvent, EnterEvent, ExitEvent, ErrorEvent } from './events.ts';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -335,12 +337,16 @@ describe('blockEvents — definition lists', () => {
   it('parses term followed by description', () => {
     const input = '; Term\n: Description';
     const events = parse(input);
+    const definitionLists = events.filter(
+      (e): e is EnterEvent => e.kind === 'enter' && e.node_type === 'definition-list',
+    );
     const terms = events.filter(
       (e): e is EnterEvent => e.kind === 'enter' && e.node_type === 'definition-term',
     );
     const descs = events.filter(
       (e): e is EnterEvent => e.kind === 'enter' && e.node_type === 'definition-description',
     );
+    expect(definitionLists.length).toBe(1);
     expect(terms.length).toBe(1);
     expect(descs.length).toBe(1);
   });
@@ -442,6 +448,68 @@ describe('blockEvents — tables', () => {
     const struct = structure(events);
     expect(struct).toContainEqual(['enter', 'table']);
     expect(struct).toContainEqual(['exit', 'table']);
+  });
+
+  it('emits a structured warning for unclosed table recovery', () => {
+    const input = '{|\n| Cell';
+    const events = parse(input);
+    const diagnostics = events.filter(
+      (event): event is ErrorEvent => event.kind === 'error',
+    );
+
+    // The block parser owns this recovery. The tree builder later adds tree
+    // anchors, but the event-layer diagnostic should already carry the stable
+    // machine-readable code, severity, and EOF position.
+    expect(diagnostics).toHaveLength(1);
+    expect(diagnostics[0].message).toBe('Unclosed table at end of input');
+    expect(diagnostics[0].code).toBe(DiagnosticCode.UNCLOSED_TABLE);
+    expect(diagnostics[0].source).toBe('block');
+    expect(diagnostics[0].recoverable).toBe(true);
+    expect(diagnostics[0].severity).toBe('warning');
+    expect(diagnostics[0].position.start.offset).toBe(input.length);
+    expect(diagnostics[0].position.end.offset).toBe(input.length);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Unicode payload classes
+// ---------------------------------------------------------------------------
+
+describe('blockEvents — Unicode payload classes', () => {
+  it('keeps representative Unicode classes as block text payloads', () => {
+    for (const fixture of UNICODE_TEXT_FIXTURES) {
+      const input = [
+        `== ${fixture.sample} ==`,
+        fixture.sample,
+        `* ${fixture.sample}`,
+      ].join('\n');
+      const events = parse(input);
+      const diagnostics = events.filter((event) => event.kind === 'error');
+
+      // These samples should stay ordinary payload text at the block layer.
+      // Headings, paragraphs, and lists may change structure, but the Unicode
+      // content inside them should not create block-level recovery noise.
+      expect(diagnostics).toEqual([]);
+      expect(textContent(events, input)).toEqual([
+        fixture.sample,
+        fixture.sample,
+        ` ${fixture.sample}`,
+      ]);
+    }
+  });
+
+  it('keeps representative Unicode classes stable under repeated block-only stress', () => {
+    for (const fixture of UNICODE_TEXT_FIXTURES) {
+      const input = `${fixture.sample}\n`.repeat(512);
+      const events = parse(input);
+      const diagnostics = events.filter((event) => event.kind === 'error');
+
+      // This keeps the syntax intentionally boring. The point is to make line
+      // tracking and paragraph continuation do a lot of work while the payload
+      // remains strange text.
+      expect(diagnostics).toEqual([]);
+      expect(events.some((event) => event.kind === 'text')).toBe(true);
+    }
   });
 });
 
@@ -570,7 +638,7 @@ describe('blockEvents — root', () => {
 describe('blockEvents — property-based', () => {
   it('never throws on arbitrary input', () => {
     fc.assert(
-      fc.property(fc.string(), (s) => {
+      fc.property(fc.string(), (s: string) => {
         const events = parse(s);
         expect(events.length).toBeGreaterThanOrEqual(2); // at least root enter/exit
       }),
@@ -580,7 +648,7 @@ describe('blockEvents — property-based', () => {
 
   it('event well-formedness: enter/exit pairs are balanced', () => {
     fc.assert(
-      fc.property(fc.string(), (s) => {
+      fc.property(fc.string(), (s: string) => {
         const events = parse(s);
         const stack: string[] = [];
 
@@ -602,7 +670,7 @@ describe('blockEvents — property-based', () => {
 
   it('root is always the outermost enter/exit', () => {
     fc.assert(
-      fc.property(fc.string(), (s) => {
+      fc.property(fc.string(), (s: string) => {
         const events = parse(s);
         const enters = events.filter((e) => e.kind === 'enter');
         const exits = events.filter((e) => e.kind === 'exit');
@@ -620,7 +688,7 @@ describe('blockEvents — property-based', () => {
 
   it('text event positions stay aligned with their source offsets', () => {
     fc.assert(
-      fc.property(fc.string(), (s) => {
+      fc.property(fc.string(), (s: string) => {
         const events = parse(s);
 
         for (const event of events) {
@@ -639,7 +707,7 @@ describe('blockEvents — property-based', () => {
 
   it('wikitext-shaped input produces valid events', () => {
     fc.assert(
-      fc.property(wikiish_string(), (s) => {
+      fc.property(wikiish_string(), (s: string) => {
         const events = parse(s);
         const stack: string[] = [];
         for (const evt of events) {
@@ -657,7 +725,7 @@ describe('blockEvents — property-based', () => {
 
   it('spacing-heavy inputs still produce balanced block events', () => {
     fc.assert(
-      fc.property(spacing_heavy_wikitext_string(), (s) => {
+      fc.property(spacing_heavy_wikitext_string(), (s: string) => {
         // Block parsing is where spacing matters most because line-start markers,
         // blank lines, and preformatted lines all compete. This property checks
         // that those decisions stay recoverable instead of corrupting nesting.
@@ -680,7 +748,7 @@ describe('blockEvents — property-based', () => {
 
   it('valid syntax with odd unicode payloads still produces balanced block events', () => {
     fc.assert(
-      fc.property(odd_character_wikitext_string(), (s) => {
+      fc.property(odd_character_wikitext_string(), (s: string) => {
         // These inputs are mostly valid constructs with strange payload text. The
         // block parser should remain forgiving because delimiter placement stays
         // sane even when the content inside those blocks is unusual.
@@ -703,7 +771,7 @@ describe('blockEvents — property-based', () => {
 
   it('pathological mixed input still produces balanced block events', () => {
     fc.assert(
-      fc.property(pathological_wikitext_string(), (s) => {
+      fc.property(pathological_wikitext_string(), (s: string) => {
         // The block parser is allowed to recover conservatively, but it is not
         // allowed to break stack discipline. Even ugly mixed input must still
         // yield a usable enter/exit structure.
