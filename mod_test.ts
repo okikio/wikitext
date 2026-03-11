@@ -16,17 +16,35 @@ import { expect } from 'jsr:@std/expect';
 import {
   TokenType,
   argument,
+  buildTree,
+  buildTreeWithLooseDiagnostics,
+  buildTreeWithRecovery,
+  collectEvents,
+  createSession,
+  DiagnosticCode,
   enterEvent,
+  events,
   errorEvent,
   exitEvent,
+  filter,
   heading,
   inlineEvents,
   isToken,
+  locateDiagnostic,
+  outlineEvents,
+  parse,
+  parseWithDiagnostics,
+  parseWithRecovery,
+  resolveDiagnosticAnchor,
+  resolveTreePath,
   root,
   slice,
   text,
   textEvent,
+  TreeBuildMode,
   tokenEvent,
+  tokens,
+  visit,
 } from './mod.ts';
 import type {
   TextSource,
@@ -98,5 +116,43 @@ describe('mod.ts exports', () => {
     })]));
     expect(events).toHaveLength(1);
     expect(events[0].kind).toBe('text');
+  });
+
+  it('re-exports orchestration helpers', () => {
+    const source = 'A [[Page|home]] link';
+
+    expect(Array.from(tokens(source)).length).toBeGreaterThan(0);
+    expect(Array.from(outlineEvents(source)).length).toBeGreaterThan(0);
+    expect(Array.from(events(source)).length).toBeGreaterThan(0);
+    expect(parse(source).type).toBe('root');
+    expect(parseWithDiagnostics(source).diagnostics).toEqual([]);
+    expect(parseWithRecovery(source).recovered).toBe(false);
+    expect(parseWithDiagnostics(source).tree.type).toBe('root');
+    expect(buildTreeWithLooseDiagnostics(events(source), { source }).diagnostics).toEqual([]);
+    expect(buildTreeWithRecovery(events(source), { source }).recovered).toBe(false);
+    expect(buildTree(events(source), { source }).type).toBe('root');
+    expect(TreeBuildMode.STRICT).toBe('strict');
+    expect(TreeBuildMode.LOOSE).toBe('loose');
+    expect(DiagnosticCode.UNCLOSED_TABLE).toBe('UNCLOSED_TABLE');
+  });
+
+  it('re-exports filter and session helpers', () => {
+    const diagnostic_result = parseWithDiagnostics('{|\n| Cell');
+    const tree = parse('== Title ==\n\nA [[Page|home]] link');
+    const visited: string[] = [];
+    const session = createSession('Text');
+
+    visit(tree, (node) => {
+      visited.push(node.type);
+    });
+
+    expect(filter(tree, 'heading')).toHaveLength(1);
+    expect(collectEvents(events('A [[Page|home]]'), 'wikilink')).toHaveLength(1);
+    expect(resolveTreePath(tree, [0])?.node.type).toBe('heading');
+    expect(resolveDiagnosticAnchor(diagnostic_result.tree, diagnostic_result.diagnostics[0].anchor)?.node.type).toBe('text');
+    expect(locateDiagnostic(diagnostic_result.tree, diagnostic_result.diagnostics[0])?.node.type).toBe('text');
+    expect(visited[0]).toBe('root');
+    expect(session.parse().type).toBe('root');
+    expect(session.parseWithDiagnostics().tree.type).toBe('root');
   });
 });
