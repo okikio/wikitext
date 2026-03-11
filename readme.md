@@ -190,17 +190,25 @@ committed to.
 ## Recovery APIs
 
 The parser always produces a valid result. What the public API lets you choose
-is whether you want the forgiving recovered tree or a more conservative tree
+is whether you want the loose recovered tree or a stricter tree
 that leaves recovery-heavy constructs as plain source text while still telling
 you what went wrong.
 
-- `parse(input)` returns the forgiving recovered tree only
+Here, `loose` and `strict` describe recovery shape, not parse success:
+
+- `loose` keeps more recovered wrapper structure when the parser can still
+  infer a usable node from the source
+- `strict` keeps the diagnostic, but prefers collapsing recovery-heavy
+  structure back to plain text when the source never clearly committed to that
+  structure
+
+- `parse(input)` returns the loose recovered tree only
 - `parseWithDiagnostics(input)` returns `{ tree, diagnostics }`, where `tree`
   strips recovery-created wrapper nodes back to plain text when possible
 - `parseWithRecovery(input)` returns `{ tree, recovered, diagnostics }` with
   the more aggressively recovered tree
 
-That gives you a default lane, a conservative diagnostics lane, and an explicit
+That gives you a default lane, a strict diagnostics lane, and an explicit
 recovery-aware lane:
 
 ```ts
@@ -272,8 +280,8 @@ grounded in measured behavior instead of guesswork.
 callers that only want document structure.
 
 When a caller also needs recovery details, use `parseWithDiagnostics()` or
-`buildTreeWithDiagnostics()`. Those APIs return a more conservative tree plus
-a `diagnostics` array.
+`buildTreeWithDiagnostics()`. Those APIs return a stricter tree plus a
+`diagnostics` array.
 
 Each diagnostic carries an `anchor`. Today that anchor is intentionally narrow:
 it is a tree-path snapshot to the nearest materialized node around the
