@@ -52,8 +52,17 @@ Each stage can also be used independently:
 - `outlineEvents(input)` returns block-level events only (no inline parsing).
 - `events(input)` returns the full event stream (block + inline).
 - `parse(input)` is shorthand for `buildTree(events(input), { source: input })`.
-- `parseWithDiagnostics(input)` keeps a more conservative tree plus recovery diagnostics.
+- `parseWithDiagnostics(input)` keeps a stricter tree plus recovery diagnostics.
 - `parseWithRecovery(input)` keeps the more aggressively recovered tree plus an explicit recovery flag and diagnostics.
+
+`strict` and `loose` are tree-shape policies, not parse-success policies. Both
+lanes still recover and still return a valid tree. The difference is how much
+recovered wrapper structure survives into the final tree:
+
+- `loose` keeps more inferred wrapper nodes when the parser can still form a
+  useful structure
+- `strict` keeps the diagnostics, but prefers collapsing recovery-heavy
+  wrappers back to plain text when the source did not clearly commit to them
 
 The extra `source` argument on `buildTree()` exists because the event stream is
 range-first. Text events carry offsets, not copied strings, so the tree
@@ -61,15 +70,31 @@ builder needs the original source to materialize `Text.value`.
 
 This means the parser's tolerance and the caller's result shape are separate
 choices. The parser still upholds its never-throw contract, but callers can
-choose whether they want only the forgiving recovered tree, a more
-conservative tree plus diagnostics, or the recovered tree plus diagnostics and
+choose whether they want only the loose recovered tree, a stricter tree plus diagnostics, or the recovered tree plus diagnostics and
 an explicit recovery summary.
 
-Today, the lower-level pieces are the part that already exists in the codebase:
+Those top-level APIs now exist in the codebase. Lower-level modules such as
 `TextSource`, tokens, events, AST node types/builders/guards, `tokenize()`,
-`blockEvents()`, and `inlineEvents()`. The orchestration helpers listed above
-describe the intended top-level API shape, but some of them are still future
-work rather than shipped exports.
+`blockEvents()`, and `inlineEvents()` still matter because they are the
+cheapest direct hooks for callers that want tighter control over cost or
+streaming behavior.
+
+The session wrapper follows the same idea. It is not a different parser. It is
+the same pipeline with layered caches so repeated queries can reuse earlier
+work.
+
+```text
+createSession(source)
+  ├─► outline()              -> cached block events
+  ├─► events()               -> cached full events
+  ├─► parse()                -> cheap loose tree lane
+  ├─► parseWithDiagnostics() -> strict tree + diagnostics
+  └─► parseWithRecovery()    -> loose tree + diagnostics + recovered
+```
+
+That lane split matters for performance. If a caller says they do not want
+diagnostics, the session should not force them to pay for diagnostic event
+allocation or diagnostics-enabled caches unless some other path already did.
 
 
 ## Events as the interchange layer
