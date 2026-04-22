@@ -12,10 +12,15 @@ import {
   spacing_heavy_wikitext_string,
   wikiish_string,
 } from './_test_utils/arbitraries.ts';
+import {
+  BARE_URI_ACCEPTANCE_FIXTURES,
+  BARE_URI_REJECTION_FIXTURES,
+  EXPLICIT_URI_ACCEPTANCE_FIXTURES,
+} from './_test_utils/uri_fixtures.ts';
 import { UNICODE_TEXT_FIXTURES } from './_test_utils/unicode_fixtures.ts';
 import { DiagnosticCode } from './events.ts';
 import { createSession } from './session.ts';
-import { events, outlineEvents, parse, parseWithDiagnostics, parseWithRecovery } from './parse.ts';
+import { events, outlineEvents, parse, parseStrictWithDiagnostics, parseWithDiagnostics, parseWithRecovery } from './parse.ts';
 import type { TextSource } from './text_source.ts';
 
 const SESSION_FIXTURES = [
@@ -57,6 +62,29 @@ type CountedSource = TextSource & {
     slice_calls: number;
   };
 };
+
+type TreeLikeNode = {
+  readonly type: string;
+  readonly children?: readonly TreeLikeNode[];
+  readonly url?: string;
+};
+
+function externalLinkUrlsFromTree(root: TreeLikeNode): string[] {
+  const result: string[] = [];
+
+  function walk(node: TreeLikeNode): void {
+    if (node.type === 'external-link' && typeof node.url === 'string') {
+      result.push(node.url);
+    }
+
+    for (const child of node.children ?? []) {
+      walk(child);
+    }
+  }
+
+  walk(root);
+  return result;
+}
 
 function createCountedSource(value: string): CountedSource {
   const counters = {
@@ -246,7 +274,21 @@ describe('createSession()', () => {
     expect(first_tree).toEqual(parse(input));
     expect(outline).toEqual(Array.from(outlineEvents(input)));
     expect(full_events).toEqual(Array.from(events(input)));
-    expect(source.counters.char_code_at_calls).toBeGreaterThan(char_calls_after_parse);
+    expect(source.counters.char_code_at_calls).toBe(char_calls_after_parse);
+  });
+
+  it('preserves the shared URI acceptance matrix through cached tree APIs', () => {
+    for (const fixture of [...BARE_URI_ACCEPTANCE_FIXTURES, ...EXPLICIT_URI_ACCEPTANCE_FIXTURES]) {
+      const session = createSession(fixture.input);
+      expect(externalLinkUrlsFromTree(session.parse())).toContain(fixture.url);
+      expect(externalLinkUrlsFromTree(session.parseWithDiagnostics().tree)).toContain(fixture.url);
+    }
+
+    for (const input of BARE_URI_REJECTION_FIXTURES) {
+      const session = createSession(input);
+      expect(externalLinkUrlsFromTree(session.parse())).toEqual([]);
+      expect(externalLinkUrlsFromTree(session.parseWithDiagnostics().tree)).toEqual([]);
+    }
   });
 
   it('keeps the cheap parse lane separate from diagnostics-enabled event caches', () => {
@@ -257,9 +299,9 @@ describe('createSession()', () => {
     session.parse();
     const char_calls_after_parse = source.counters.char_code_at_calls;
 
-    Array.from(session.events());
+    Array.from(session.events({ diagnostics: true }));
     const char_calls_after_first_events = source.counters.char_code_at_calls;
-    Array.from(session.events());
+    Array.from(session.events({ diagnostics: true }));
 
     expect(char_calls_after_first_events).toBeGreaterThan(char_calls_after_parse);
     expect(source.counters.char_code_at_calls).toBe(char_calls_after_first_events);
@@ -358,21 +400,21 @@ describe('createSession()', () => {
     expect(result.diagnostics[0].anchor).toEqual({
       kind: 'tree-path',
       path: [0],
-      node_type: 'text',
+      node_type: 'table',
     });
     expect(result.diagnostics[0].recoverable).toBe(true);
     expect(result.diagnostics[0].severity).toBe('warning');
   });
 
-  it('does not reuse the loose tree identity when diagnostics strip recovered nodes', () => {
+  it('reuses the same default tree shape as parse()', () => {
     const session = createSession('{|\n| Cell');
     const tree = session.parse();
     const result = session.parseWithDiagnostics();
 
-    expect(result.tree).not.toBe(tree);
+    expect(result.tree).toEqual(tree);
   });
 
-  it('parseWithRecovery() keeps the loose tree while parseWithDiagnostics() stays strict', () => {
+  it('parseWithRecovery() keeps the same tree as parseWithDiagnostics() and adds only the summary', () => {
     const session = createSession('{|\n| Cell');
     const diagnostics_result = session.parseWithDiagnostics();
     const recovery_result = session.parseWithRecovery();
@@ -389,9 +431,29 @@ describe('createSession()', () => {
       diagnostics_result.diagnostics[0]?.position,
     );
     expect(recovery_result.diagnostics[0]?.anchor.node_type).toBe('table');
-    expect(diagnostics_result.diagnostics[0]?.anchor.node_type).toBe('text');
+    expect(diagnostics_result.diagnostics[0]?.anchor.node_type).toBe('table');
     expect(recovery_result.recovered).toBe(true);
     expect(recovery_result.tree.children[0]?.type).toBe('table');
-    expect(diagnostics_result.tree.children[0]?.type).toBe('text');
+    expect(diagnostics_result.tree.children[0]?.type).toBe('table');
+  });
+
+  it('parseStrictWithDiagnostics() matches the stateless conservative diagnostics API', () => {
+    for (const input of SESSION_FIXTURES) {
+      const session = createSession(input);
+      expect(session.parseStrictWithDiagnostics()).toEqual(parseStrictWithDiagnostics(input));
+    }
+  });
+
+  it('parseStrictWithDiagnostics() keeps conservative materialization distinct from the default diagnostics lane', () => {
+    const session = createSession('{|\n| Cell');
+    const strict_result = session.parseStrictWithDiagnostics();
+    const diagnostics_result = session.parseWithDiagnostics();
+
+    expect(strict_result.diagnostics).toHaveLength(diagnostics_result.diagnostics.length);
+    expect(strict_result.diagnostics[0]?.code).toBe(diagnostics_result.diagnostics[0]?.code);
+    expect(strict_result.diagnostics[0]?.message).toBe(diagnostics_result.diagnostics[0]?.message);
+    expect(strict_result.diagnostics[0]?.source).toBe(diagnostics_result.diagnostics[0]?.source);
+    expect(strict_result.tree.children[0]?.type).toBe('text');
+    expect(diagnostics_result.tree.children[0]?.type).toBe('table');
   });
 });
