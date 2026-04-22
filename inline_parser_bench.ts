@@ -7,6 +7,8 @@
 
 import { bench, do_not_optimize, run, summary } from 'npm:mitata';
 
+import type { WikitextEvent } from './events.ts';
+
 import {
   cycleInputs,
   drainInlineEvents,
@@ -18,6 +20,11 @@ import {
   SAME_SIZE_PATHOLOGICAL_TEXT,
   SYNTHETIC_ARTICLE_INPUTS,
 } from './_test_utils/perf_fixtures.ts';
+import {
+  BARE_URI_ACCEPTANCE_FIXTURES,
+  BARE_URI_REJECTION_FIXTURES,
+  EXPLICIT_URI_ACCEPTANCE_FIXTURES,
+} from './_test_utils/uri_fixtures.ts';
 import {
   blockEvents,
   enterEvent,
@@ -57,6 +64,12 @@ type ParagraphHandoffState = {
   child_count: number;
   breaks_before: number;
   breaks_after: number;
+};
+
+type TextChunkFixture = {
+  source: string;
+  merged_events: WikitextEvent[];
+  fragmented_events: WikitextEvent[];
 };
 
 function createBenchPosition(offset: number): BenchPosition {
@@ -114,6 +127,40 @@ function createParagraphHandoffState(
   };
 }
 
+function createSingleLinePosition(start_offset: number, end_offset: number): BenchPosition {
+  return {
+    start: {
+      line: 1,
+      column: start_offset + 1,
+      offset: start_offset,
+    },
+    end: {
+      line: 1,
+      column: end_offset + 1,
+      offset: end_offset,
+    },
+  };
+}
+
+function createChunkedTextEvents(source: string, chunk_size: number): WikitextEvent[] {
+  const events: WikitextEvent[] = [];
+
+  for (let start_offset = 0; start_offset < source.length; start_offset += chunk_size) {
+    const end_offset = Math.min(source.length, start_offset + chunk_size);
+    events.push(textEvent(start_offset, end_offset, createSingleLinePosition(start_offset, end_offset)));
+  }
+
+  return events;
+}
+
+function createTextChunkFixture(source: string, chunk_size: number): TextChunkFixture {
+  return {
+    source,
+    merged_events: [textEvent(0, source.length, createSingleLinePosition(0, source.length))],
+    fragmented_events: createChunkedTextEvents(source, chunk_size),
+  };
+}
+
 const POSITION_CASES = [
   createBenchPosition(0),
   createBenchPosition(1),
@@ -147,6 +194,31 @@ const nextMixedText = cycleInputs(MIXED_TEXT_INPUTS);
 const nextPathologicalText = cycleInputs(PATHOLOGICAL_TEXT_INPUTS);
 const nextInlineHeavyText = cycleInputs(INLINE_HEAVY_TEXT_INPUTS);
 const nextSyntheticArticle = cycleInputs(SYNTHETIC_ARTICLE_INPUTS);
+
+const HANDOFF_PLAIN_TEXT = [
+  'Observational records preserve calibration notes, atmospheric corrections, and cautious prose across many contiguous sentences.',
+  'The point of this fixture is to keep the bytes mostly plain text so the inline parser should spend most of its time proving that nothing special needs to happen.',
+  'That makes it a useful way to measure the merge cost of fragmented text groups against one already-merged handoff.',
+].join(' ')
+  .repeat(28);
+
+const HANDOFF_URL_HEAVY_TEXT = [
+  'Visit https://example.com/path(test)?q=alpha,beta and then https://example.org/docs/path(testing).',
+  'The surrounding prose adds punctuation, commas, and parentheses so the scanner has to do real boundary work instead of only matching the scheme prefix.',
+].join(' ')
+  .repeat(32);
+
+const URI_ACCEPTANCE_CORPUS = [
+  ...BARE_URI_ACCEPTANCE_FIXTURES.map((fixture) => fixture.input),
+  ...EXPLICIT_URI_ACCEPTANCE_FIXTURES.map((fixture) => fixture.input),
+].join(' ')
+  .repeat(28);
+
+const URI_REJECTION_CORPUS = BARE_URI_REJECTION_FIXTURES.join(' ')
+  .repeat(56);
+
+const PLAIN_HANDOFF_FIXTURE = createTextChunkFixture(HANDOFF_PLAIN_TEXT, 32);
+const URL_HANDOFF_FIXTURE = createTextChunkFixture(HANDOFF_URL_HEAVY_TEXT, 32);
 
 summary(() => {
   bench('inline helper: create position lookup', () => {
@@ -220,6 +292,14 @@ summary(() => {
   bench('inlineEvents: same-size pathological (~8 KB)', () => {
     do_not_optimize(drainInlineEvents(SAME_SIZE_PATHOLOGICAL_TEXT));
   }).gc('inner');
+
+  bench('inlineEvents: URI acceptance corpus (~8 KB)', () => {
+    do_not_optimize(drainInlineEvents(URI_ACCEPTANCE_CORPUS));
+  }).gc('inner');
+
+  bench('inlineEvents: URI rejection corpus (~8 KB)', () => {
+    do_not_optimize(drainInlineEvents(URI_REJECTION_CORPUS));
+  }).gc('inner');
 });
 
 summary(() => {
@@ -238,6 +318,24 @@ summary(() => {
   bench('inline pipeline: replay block events into inline parser (mixed ~8 KB)', () => {
     const source = SAME_SIZE_MIXED_TEXT;
     do_not_optimize(Array.from(inlineEvents(source, blockEvents(source, tokenize(source)))).length);
+  }).gc('inner');
+});
+
+summary(() => {
+  bench('inline handoff: merged plain prose group (~8 KB)', () => {
+    do_not_optimize(Array.from(inlineEvents(PLAIN_HANDOFF_FIXTURE.source, PLAIN_HANDOFF_FIXTURE.merged_events)).length);
+  }).gc('inner');
+
+  bench('inline handoff: fragmented plain prose groups (~8 KB)', () => {
+    do_not_optimize(Array.from(inlineEvents(PLAIN_HANDOFF_FIXTURE.source, PLAIN_HANDOFF_FIXTURE.fragmented_events)).length);
+  }).gc('inner');
+
+  bench('inline handoff: merged URL-heavy prose (~8 KB)', () => {
+    do_not_optimize(Array.from(inlineEvents(URL_HANDOFF_FIXTURE.source, URL_HANDOFF_FIXTURE.merged_events)).length);
+  }).gc('inner');
+
+  bench('inline handoff: fragmented URL-heavy prose (~8 KB)', () => {
+    do_not_optimize(Array.from(inlineEvents(URL_HANDOFF_FIXTURE.source, URL_HANDOFF_FIXTURE.fragmented_events)).length);
   }).gc('inner');
 });
 

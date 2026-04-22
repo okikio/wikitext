@@ -83,15 +83,25 @@ const CC_LF = 0x0a;
 const CC_CR = 0x0d;
 const CC_SPACE = 0x20;
 const CC_TAB = 0x09;
+const CC_BANG = 0x21;
 const CC_HASH = 0x23;
 const CC_AMP = 0x26;
+const CC_PERCENT = 0x25;
 const CC_APOSTROPHE = 0x27;
+const CC_OPEN_PAREN = 0x28;
+const CC_CLOSE_PAREN = 0x29;
+const CC_PLUS = 0x2b;
+const CC_COMMA = 0x2c;
 const CC_DASH = 0x2d;
+const CC_PERIOD = 0x2e;
 const CC_SLASH = 0x2f;
 const CC_COLON = 0x3a;
+const CC_SEMICOLON = 0x3b;
 const CC_LT = 0x3c;
 const CC_EQUALS = 0x3d;
+const CC_QUESTION = 0x3f;
 const CC_GT = 0x3e;
+const CC_AT = 0x40;
 const CC_OPEN_BRACKET = 0x5b;
 const CC_CLOSE_BRACKET = 0x5d;
 const CC_OPEN_BRACE = 0x7b;
@@ -99,7 +109,6 @@ const CC_CLOSE_BRACE = 0x7d;
 const CC_UNDERSCORE = 0x5f;
 const CC_PIPE = 0x7c;
 const CC_TILDE = 0x7e;
-const CC_LOWER_H = 0x68;
 const CC_DOUBLE_QUOTE = 0x22;
 const CC_SINGLE_QUOTE = 0x27;
 
@@ -114,7 +123,7 @@ const CC_SINGLE_QUOTE = 0x27;
  *
  * Two of the starts are worth calling out because they are less obvious than
  * `[` or `<`:
- * - `h` is here so the scanner can notice bare `http://` and `https://` URLs
+ * - `:` is here because bare URI detection commits at the scheme separator
  * - `{` is here so templates and triple-brace arguments stay on the fast path
  */
 function isInlineSpecialStart(code: number): boolean {
@@ -125,7 +134,7 @@ function isInlineSpecialStart(code: number): boolean {
     case CC_AMP:
     case CC_OPEN_BRACKET:
     case CC_APOSTROPHE:
-    case CC_LOWER_H:
+    case CC_COLON:
     case CC_OPEN_BRACE:
       return true;
 
@@ -173,28 +182,29 @@ interface TextGroupContext {
   /** Absolute offsets where each logical line in this text group begins. */
   line_starts: number[];
   /** Whether inline recovery should emit diagnostic events. */
-  include_diagnostics: boolean;
+  diagnostics: boolean;
   /**
-  * Whether recoverable inline constructs should stay loose or strict.
+  * Whether recoverable inline constructs keep the default overlay or collapse
+  * back to text.
    *
-   * `loose` keeps recovered wrapper structure when an opener was real but a
-   * closer never arrived. `strict` keeps the diagnostic but collapses the
-   * same region back to plain text.
+   * `default` keeps recovered wrapper structure when an opener was real but a
+   * closer never arrived. `conservative` keeps the diagnostic but collapses
+   * the same region back to plain text.
    */
-  recovery_style: 'loose' | 'strict';
+  recovery: 'default' | 'conservative';
 }
 
 /**
  * Internal switches for one inline-enrichment lane.
  *
  * These mirror the public parse lanes so the inline parser does not do extra
- * diagnostic work when the caller only wanted the cheap loose tree.
+ * diagnostic work when the caller only wanted the cheap default tree.
  */
-interface InlineEventOptions {
-  /** Whether inline-stage recovery should emit diagnostic events. */
-  readonly include_diagnostics?: boolean;
-  /** Whether recoverable inline constructs stay structurally loose or strict. */
-  readonly recovery_style?: 'loose' | 'strict';
+export interface InlineEventOptions {
+  /** Whether inline-stage diagnostics are emitted into the event stream. */
+  readonly diagnostics?: boolean;
+  /** Whether malformed inline regions keep the default tree overlay or collapse back to text. */
+  readonly recovery?: 'default' | 'conservative';
 }
 
 /**
@@ -204,6 +214,8 @@ interface InlineEventOptions {
  * the full enter/exit/text sequence for the construct that matched.
  */
 interface SpecialMatch {
+  /** Inclusive start offset of the recognized construct. */
+  start_offset?: number;
   /** Exclusive end offset of the recognized construct. */
   end_offset: number;
   /** Events emitted for the recognized inline construct. */
@@ -377,8 +389,8 @@ function* parseTextGroup(
     last.end_offset,
     first.position.start,
   );
-  ctx.include_diagnostics = options.include_diagnostics !== false;
-  ctx.recovery_style = options.recovery_style ?? 'loose';
+  ctx.diagnostics = options.diagnostics === true;
+  ctx.recovery = options.recovery ?? 'default';
 
   yield* parseInlineRange(ctx, ctx.start_offset, ctx.end_offset, true);
 }
@@ -442,14 +454,16 @@ function* parseInlineRange(
     cursor = findNextInlineSpecialStart(ctx.source, cursor, end_offset);
     if (cursor >= end_offset) break;
 
-    const match = matchSpecial(ctx, cursor, end_offset, allow_bare_url);
+    const match = matchSpecial(ctx, cursor, end_offset, allow_bare_url, plain_start);
     if (match === null) {
       cursor++;
       continue;
     }
 
-    if (plain_start < cursor) {
-      yield emitText(ctx, plain_start, cursor);
+    const match_start = match.start_offset ?? cursor;
+
+    if (plain_start < match_start) {
+      yield emitText(ctx, plain_start, match_start);
     }
 
     for (const event of match.events) {
@@ -499,6 +513,7 @@ function matchSpecial(
   cursor: number,
   end_offset: number,
   allow_bare_url: boolean,
+  plain_start: number,
 ): SpecialMatch | null {
   const code = ctx.source.charCodeAt(cursor);
 
@@ -528,8 +543,8 @@ function matchSpecial(
       return matchWikilink(ctx, cursor, end_offset) ??
         matchExternalLink(ctx, cursor, end_offset);
 
-    case CC_LOWER_H:
-      return allow_bare_url ? matchBareUrl(ctx, cursor, end_offset) : null;
+    case CC_COLON:
+      return allow_bare_url ? matchBareUrl(ctx, cursor, end_offset, plain_start) : null;
 
     case CC_APOSTROPHE:
       return matchEmphasis(ctx, cursor, end_offset);
@@ -852,11 +867,12 @@ function matchExternalLink(
     return null;
   }
 
-  const close = indexOfChar(ctx.source, CC_CLOSE_BRACKET, cursor + 1, end_offset);
+  const url_end = scanUrl(ctx.source, cursor + 1, end_offset, 'explicit');
+  if (url_end === cursor + 1) return null;
+
+  const close = indexOfChar(ctx.source, CC_CLOSE_BRACKET, url_end, end_offset);
   if (close === -1) return null;
 
-  const url_end = scanUrl(ctx.source, cursor + 1, close);
-  if (url_end === cursor + 1) return null;
   const url = ctx.source.slice(cursor + 1, url_end);
   const outer_end = close + 1;
   const outer_pos = createPosition(ctx, cursor, outer_end);
@@ -877,17 +893,24 @@ function matchExternalLink(
   return { end_offset: outer_end, events };
 }
 
-/** Match bare `http://` or `https://` URLs in plain text. */
+/** Match bare URI-like links in plain text once a scheme separator is reached. */
 function matchBareUrl(
   ctx: TextGroupContext,
   cursor: number,
   end_offset: number,
+  plain_start: number,
 ): SpecialMatch | null {
-  const url_end = scanUrl(ctx.source, cursor, end_offset);
-  if (url_end === cursor) return null;
-  const url = ctx.source.slice(cursor, url_end);
-  const pos = createPosition(ctx, cursor, url_end);
+  const url_start = findBareUrlStart(ctx.source, cursor, plain_start);
+  if (url_start === -1 || !isBareUrlStartBoundary(ctx.source, url_start)) {
+    return null;
+  }
+
+  const url_end = scanUrl(ctx.source, url_start, end_offset, 'bare');
+  if (url_end === url_start) return null;
+  const url = ctx.source.slice(url_start, url_end);
+  const pos = createPosition(ctx, url_start, url_end);
   return {
+    start_offset: url_start,
     end_offset: url_end,
     events: [
       enterEvent('external-link', { url }, pos),
@@ -1008,7 +1031,7 @@ function matchTagLike(
     if (close === null) {
       return {
         end_offset,
-        events: ctx.recovery_style === 'strict'
+        events: ctx.recovery === 'conservative'
           ? preserveMissingCloseTagAsText(ctx, cursor, end_offset, tag.tag_name)
           : wrapRecoveredLeaf(
             ctx,
@@ -1041,7 +1064,7 @@ function matchTagLike(
     if (close === null) {
       return {
         end_offset,
-        events: ctx.recovery_style === 'strict'
+        events: ctx.recovery === 'conservative'
           ? preserveMissingCloseTagAsText(ctx, cursor, end_offset, tag.tag_name)
           : createRecoveredWrappedInlineEvents(
             ctx,
@@ -1086,7 +1109,7 @@ function matchTagLike(
   if (close === null) {
     return {
       end_offset,
-      events: ctx.recovery_style === 'strict'
+      events: ctx.recovery === 'conservative'
         ? preserveMissingCloseTagAsText(ctx, cursor, end_offset, tag.tag_name)
         : createRecoveredWrappedInlineEvents(
           ctx,
@@ -1177,8 +1200,8 @@ function buildTextGroupContext(
     end_offset,
     start_point,
     line_starts,
-    include_diagnostics: true,
-    recovery_style: 'loose',
+    diagnostics: true,
+    recovery: 'default',
   };
 }
 
@@ -1291,7 +1314,7 @@ function createRecoveredWrappedInlineEvents(
     content_end,
     allow_bare_url,
   );
-  if (ctx.include_diagnostics) {
+  if (ctx.diagnostics) {
     events.splice(events.length - 1, 0, missingCloseTagError(ctx, end_offset, tag_name));
   }
   return events;
@@ -1310,7 +1333,7 @@ function wrapRecoveredLeaf(
 ): WikitextEvent[] {
   const position = createPosition(ctx, start_offset, end_offset);
   const events: WikitextEvent[] = [enterEvent(node_type, props, position)];
-  if (ctx.include_diagnostics) {
+  if (ctx.diagnostics) {
     events.push(missingCloseTagError(ctx, end_offset, tag_name));
   }
   events.push(exitEvent(node_type, position));
@@ -1327,7 +1350,7 @@ function preserveUnterminatedTagOpenerAsText(
   tag_name: string,
 ): WikitextEvent[] {
   const events: WikitextEvent[] = [];
-  if (ctx.include_diagnostics) {
+  if (ctx.diagnostics) {
     events.push(unterminatedTagOpenerError(ctx, end_offset, tag_name));
   }
   events.push(emitText(ctx, start_offset, end_offset));
@@ -1341,7 +1364,7 @@ function preserveMissingCloseTagAsText(
   tag_name: string,
 ): WikitextEvent[] {
   const events: WikitextEvent[] = [];
-  if (ctx.include_diagnostics) {
+  if (ctx.diagnostics) {
     events.push(missingCloseTagError(ctx, end_offset, tag_name));
   }
   events.push(emitText(ctx, start_offset, end_offset));
@@ -2103,33 +2126,319 @@ function repeatedCharRun(
 /**
  * Scan a bare or bracketed external-link URL prefix.
  *
- * Only `http://` and `https://` are recognized today. The scan stops before
- * ASCII whitespace, a closing bracket, tag boundary characters, or quotes.
+ * This stays deliberately lightweight. It accepts either a generic
+ * `scheme://...` prefix or a small allowlist of colon-only schemes such as
+ * `mailto:` and `data:`. The scan then applies simple boundary rules and a
+ * trim pass instead of instantiating heavier URL objects in the hot path.
  */
-function scanUrl(source: TextSource, start_offset: number, end_offset: number): number {
-  const is_http = hasLiteral(source, start_offset, end_offset, 'http://');
-  const is_https = hasLiteral(source, start_offset, end_offset, 'https://');
-  if (!is_http && !is_https) return start_offset;
+type UrlScanMode = 'bare' | 'explicit';
 
-  let cursor = start_offset + (is_https ? 8 : 7);
+type UriPrefix = {
+  scheme_end: number;
+  payload_start: number;
+  has_authority: boolean;
+};
+
+function scanUrl(
+  source: TextSource,
+  start_offset: number,
+  end_offset: number,
+  mode: UrlScanMode,
+): number {
+  const prefix = scanUriPrefix(source, start_offset, end_offset);
+  if (prefix === null) return start_offset;
+
+  const { payload_start } = prefix;
+
+  let cursor = payload_start;
+  if (cursor >= end_offset) return start_offset;
+
+  const first_payload_code = source.charCodeAt(cursor);
+  if (isUrlStopCode(first_payload_code)) return start_offset;
+
+  let open_paren_count = 0;
+  let open_square_count = 0;
+  let open_curly_count = 0;
+
   while (cursor < end_offset) {
     const code = source.charCodeAt(cursor);
-    if (
-      code === CC_SPACE ||
-      code === CC_TAB ||
-      code === CC_LF ||
-      code === CC_CR ||
-      code === CC_CLOSE_BRACKET ||
-      code === CC_GT ||
-      code === CC_DOUBLE_QUOTE ||
-      code === CC_SINGLE_QUOTE
-    ) {
+
+    if (code === CC_OPEN_PAREN) {
+      open_paren_count++;
+      cursor++;
+      continue;
+    }
+
+    if (code === CC_CLOSE_PAREN) {
+      if (open_paren_count === 0) break;
+      open_paren_count--;
+      cursor++;
+      continue;
+    }
+
+    if (code === CC_OPEN_BRACKET) {
+      open_square_count++;
+      cursor++;
+      continue;
+    }
+
+    if (code === CC_CLOSE_BRACKET) {
+      if (open_square_count === 0) break;
+      open_square_count--;
+      cursor++;
+      continue;
+    }
+
+    if (code === CC_OPEN_BRACE) {
+      open_curly_count++;
+      cursor++;
+      continue;
+    }
+
+    if (code === CC_CLOSE_BRACE) {
+      if (open_curly_count === 0) break;
+      open_curly_count--;
+      cursor++;
+      continue;
+    }
+
+    if (isUrlStopCode(code)) {
       break;
     }
+
     cursor++;
   }
 
+  const trimmed = trimBareUrlTrailingPunctuation(source, start_offset, cursor);
+  if (mode === 'bare' && !isBareAutolinkCandidate(source, start_offset, prefix, trimmed)) {
+    return start_offset;
+  }
+
+  return trimmed > payload_start ? trimmed : start_offset;
+}
+
+function findBareUrlStart(source: TextSource, colon_offset: number, min_offset: number): number {
+  let cursor = colon_offset - 1;
+
+  while (cursor >= min_offset && isUriSchemeChar(source.charCodeAt(cursor))) {
+    cursor--;
+  }
+
+  const start_offset = cursor + 1;
+  const scheme_length = colon_offset - start_offset;
+  if (scheme_length < 2) return -1;
+  if (start_offset < min_offset || !isAsciiLetter(source.charCodeAt(start_offset))) {
+    return -1;
+  }
+
+  return start_offset;
+}
+
+function scanUriPrefix(source: TextSource, start_offset: number, end_offset: number): UriPrefix | null {
+  if (start_offset >= end_offset || !isAsciiLetter(source.charCodeAt(start_offset))) {
+    return null;
+  }
+
+  let cursor = start_offset + 1;
+  while (cursor < end_offset && isUriSchemeChar(source.charCodeAt(cursor))) {
+    cursor++;
+  }
+
+  if (cursor >= end_offset || source.charCodeAt(cursor) !== CC_COLON) {
+    return null;
+  }
+
+  const scheme_end = cursor;
+  if (scheme_end - start_offset < 2) {
+    return null;
+  }
+
+  const after_colon = cursor + 1;
+  if (after_colon >= end_offset) {
+    return null;
+  }
+
+  if (
+    after_colon + 1 < end_offset &&
+    source.charCodeAt(after_colon) === CC_SLASH &&
+    source.charCodeAt(after_colon + 1) === CC_SLASH
+  ) {
+    return {
+      scheme_end,
+      payload_start: after_colon + 2,
+      has_authority: true,
+    };
+  }
+
+  return {
+    scheme_end,
+    payload_start: after_colon,
+    has_authority: false,
+  };
+}
+
+function isBareUrlStartBoundary(source: TextSource, offset: number): boolean {
+  if (offset <= 0) return true;
+
+  const previous = source.charCodeAt(offset - 1);
+  return !isAsciiAlphanumeric(previous) && previous !== CC_UNDERSCORE;
+}
+
+function isUrlStopCode(code: number): boolean {
+  return code === CC_SPACE ||
+    code === CC_TAB ||
+    code === CC_LF ||
+    code === CC_CR ||
+    code === CC_LT ||
+    code === CC_GT ||
+    code === CC_DOUBLE_QUOTE ||
+    code === CC_SINGLE_QUOTE;
+}
+
+function isUriSchemeChar(code: number): boolean {
+  return isAsciiAlphanumeric(code) || code === CC_PLUS || code === CC_DASH || code === CC_PERIOD;
+}
+
+function isBareAutolinkCandidate(
+  source: TextSource,
+  start_offset: number,
+  prefix: UriPrefix,
+  end_offset: number,
+): boolean {
+  if (!isBareAutolinkSchemePlausible(source, start_offset, prefix.scheme_end)) {
+    return false;
+  }
+
+  if (prefix.has_authority) {
+    return true;
+  }
+
+  return hasBareOpaqueUriEvidence(source, prefix.payload_start, end_offset);
+}
+
+function isBareAutolinkSchemePlausible(source: TextSource, start_offset: number, end_offset: number): boolean {
+  let has_separator = false;
+
+  for (let cursor = start_offset; cursor < end_offset; cursor++) {
+    const code = source.charCodeAt(cursor);
+    if (code === CC_PLUS || code === CC_DASH || code === CC_PERIOD) {
+      has_separator = true;
+      break;
+    }
+  }
+
+  if (has_separator) {
+    return true;
+  }
+
+  return end_offset - start_offset <= 7;
+}
+
+function hasBareOpaqueUriEvidence(source: TextSource, start_offset: number, end_offset: number): boolean {
+  let saw_strong_signal = false;
+  let structural_signal_count = 0;
+  let colon_count = 0;
+  let saw_digit = false;
+
+  for (let cursor = start_offset; cursor < end_offset; cursor++) {
+    const code = source.charCodeAt(cursor);
+
+    if (isAsciiDigit(code)) {
+      saw_digit = true;
+      continue;
+    }
+
+    if (isStrongOpaqueUriSignal(code)) {
+      saw_strong_signal = true;
+      continue;
+    }
+
+    if (code === CC_COLON) {
+      colon_count++;
+      structural_signal_count++;
+      continue;
+    }
+
+    if (code === CC_EQUALS || code === CC_SEMICOLON || code === CC_COMMA || code === CC_AMP) {
+      structural_signal_count++;
+      continue;
+    }
+
+    if (code === CC_PLUS && cursor === start_offset && cursor + 1 < end_offset) {
+      if (isAsciiDigit(source.charCodeAt(cursor + 1))) {
+        return true;
+      }
+      structural_signal_count++;
+    }
+  }
+
+  if (saw_strong_signal) {
+    return true;
+  }
+
+  if (colon_count > 0 && saw_digit) {
+    return true;
+  }
+
+  return structural_signal_count >= 2;
+}
+
+function isStrongOpaqueUriSignal(code: number): boolean {
+  return code === CC_AT ||
+    code === CC_SLASH ||
+    code === CC_HASH ||
+    code === CC_QUESTION ||
+    code === CC_PERCENT;
+}
+
+function trimBareUrlTrailingPunctuation(
+  source: TextSource,
+  start_offset: number,
+  end_offset: number,
+): number {
+  let cursor = end_offset;
+
+  while (cursor > start_offset) {
+    const code = source.charCodeAt(cursor - 1);
+
+    if (
+      code === CC_PERIOD ||
+      code === CC_COMMA ||
+      code === CC_SEMICOLON ||
+      code === CC_COLON ||
+      code === CC_BANG ||
+      code === CC_QUESTION
+    ) {
+      cursor--;
+      continue;
+    }
+
+    if (code === CC_CLOSE_PAREN && hasUnmatchedTrailingCloseParen(source, start_offset, cursor)) {
+      cursor--;
+      continue;
+    }
+
+    break;
+  }
+
   return cursor;
+}
+
+function hasUnmatchedTrailingCloseParen(
+  source: TextSource,
+  start_offset: number,
+  end_offset: number,
+): boolean {
+  let open_count = 0;
+  let close_count = 0;
+
+  for (let cursor = start_offset; cursor < end_offset; cursor++) {
+    const code = source.charCodeAt(cursor);
+    if (code === CC_OPEN_PAREN) open_count++;
+    if (code === CC_CLOSE_PAREN) close_count++;
+  }
+
+  return close_count > open_count;
 }
 
 /** Whether a code point is an ASCII letter. */

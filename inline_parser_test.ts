@@ -16,6 +16,11 @@ import {
   pathological_wikitext_string,
   spacing_heavy_wikitext_string,
 } from './_test_utils/arbitraries.ts';
+import {
+  BARE_URI_ACCEPTANCE_FIXTURES,
+  BARE_URI_REJECTION_FIXTURES,
+  EXPLICIT_URI_ACCEPTANCE_FIXTURES,
+} from './_test_utils/uri_fixtures.ts';
 import { tokenize } from './tokenizer.ts';
 import { blockEvents } from './block_parser.ts';
 import { inlineEvents } from './inline_parser.ts';
@@ -23,7 +28,9 @@ import { DiagnosticCode, textEvent } from './events.ts';
 import type { EnterEvent, ErrorEvent, ExitEvent, WikitextEvent } from './events.ts';
 
 function parse(input: string): WikitextEvent[] {
-  return [...inlineEvents(input, blockEvents(input, tokenize(input)))];
+  return [...inlineEvents(input, blockEvents(input, tokenize(input), { diagnostics: true }), {
+    diagnostics: true,
+  })];
 }
 
 /** Reduce the stream to enter/exit pairs so nesting assertions stay compact. */
@@ -188,20 +195,120 @@ describe('inlineEvents — links', () => {
   });
 
   it('parses bracketed external links', () => {
-    const input = '[https://example.com Example]';
+    const { input, url } = EXPLICIT_URI_ACCEPTANCE_FIXTURES[0];
     const events = parse(input);
     const link = expectEnter(events, 'external-link');
 
-    expect(link.props).toEqual({ url: 'https://example.com' });
+    expect(link.props).toEqual({ url });
     expect(textValues(events, input)).toContain('Example');
   });
 
   it('parses bare URLs as external links', () => {
-    const input = 'Visit https://example.com now';
+    const { input, url } = BARE_URI_ACCEPTANCE_FIXTURES[0];
+    const events = parse(input);
+    const link = expectEnter(events, 'external-link');
+
+    expect(link.props).toEqual({ url });
+  });
+
+  it('parses bare file URIs as external links', () => {
+    const { input, url } = BARE_URI_ACCEPTANCE_FIXTURES[1];
+    const events = parse(input);
+    const link = expectEnter(events, 'external-link');
+
+    expect(link.props).toEqual({ url });
+  });
+
+  it('parses bare mailto URIs as external links', () => {
+    const { input, url } = BARE_URI_ACCEPTANCE_FIXTURES[2];
+    const events = parse(input);
+    const link = expectEnter(events, 'external-link');
+
+    expect(link.props).toEqual({ url });
+  });
+
+  it('accepts the bare opaque URI cases from the acceptance matrix', () => {
+    for (const { input, url } of BARE_URI_ACCEPTANCE_FIXTURES.slice(3, 7)) {
+      const events = parse(input);
+      const link = expectEnter(events, 'external-link');
+
+      expect(link.props).toEqual({ url });
+    }
+  });
+
+  it('parses bare custom scheme URIs when they use // authority syntax', () => {
+    const { input, url } = BARE_URI_ACCEPTANCE_FIXTURES[7];
+    const events = parse(input);
+    const link = expectEnter(events, 'external-link');
+
+    expect(link.props).toEqual({ url });
+  });
+
+  it('does not treat arbitrary colon prose as an external link', () => {
+    const input = BARE_URI_REJECTION_FIXTURES[0];
+    const events = parse(input);
+
+    expect(firstEnter(events, 'external-link')).toBeUndefined();
+    expect(textValues(events, input).join('')).toBe(input);
+  });
+
+  it('does not treat short opaque colon prose as an external link', () => {
+    const input = BARE_URI_REJECTION_FIXTURES[1];
+    const events = parse(input);
+
+    expect(firstEnter(events, 'external-link')).toBeUndefined();
+    expect(textValues(events, input).join('')).toBe(input);
+  });
+
+  it('rejects the low-confidence bare opaque cases from the acceptance matrix', () => {
+    for (const input of BARE_URI_REJECTION_FIXTURES.slice(1, 4)) {
+      const events = parse(input);
+
+      expect(firstEnter(events, 'external-link')).toBeUndefined();
+      expect(textValues(events, input).join('')).toBe(input);
+    }
+  });
+
+  it('keeps trailing sentence punctuation outside bare URLs', () => {
+    const input = 'Visit https://example.com.';
     const events = parse(input);
     const link = expectEnter(events, 'external-link');
 
     expect(link.props).toEqual({ url: 'https://example.com' });
+    expect(textValues(events, input).join('')).toBe('Visit .');
+  });
+
+  it('does not start a bare URL in the middle of an ASCII word', () => {
+    const input = BARE_URI_REJECTION_FIXTURES[4];
+    const events = parse(input);
+
+    expect(firstEnter(events, 'external-link')).toBeUndefined();
+    expect(textValues(events, input).join('')).toBe(input);
+  });
+
+  it('does not treat a scheme with no payload as a bare URL', () => {
+    const input = BARE_URI_REJECTION_FIXTURES[5];
+    const events = parse(input);
+
+    expect(firstEnter(events, 'external-link')).toBeUndefined();
+    expect(textValues(events, input).join('')).toBe(input);
+  });
+
+  it('keeps balanced parentheses inside bare URLs but trims an unmatched outer closer', () => {
+    const input = 'Visit (https://example.com/path(test)) now';
+    const events = parse(input);
+    const link = expectEnter(events, 'external-link');
+
+    expect(link.props).toEqual({ url: 'https://example.com/path(test)' });
+    expect(textValues(events, input).join('')).toBe('Visit () now');
+  });
+
+  it('keeps balanced square brackets inside bare URIs for IPv6 authorities', () => {
+    const input = 'Visit http://[::1]:5000/connect/token now';
+    const events = parse(input);
+    const link = expectEnter(events, 'external-link');
+
+    expect(link.props).toEqual({ url: 'http://[::1]:5000/connect/token' });
   });
 
   it('trims wikilink target padding but leaves label spacing untouched', () => {
@@ -242,6 +349,42 @@ describe('inlineEvents — links', () => {
     // general whitespace in other inline contexts.
 
     expect(link.props).toEqual({ url: 'https://example.com' });
+    expect(textValues(events, input).join('')).toBe('Label');
+  });
+
+  it('keeps trailing punctuation outside bracketed external-link URLs too', () => {
+    const input = '[https://example.com, Label]';
+    const events = parse(input);
+    const link = expectEnter(events, 'external-link');
+
+    expect(link.props).toEqual({ url: 'https://example.com' });
+    expect(textValues(events, input).join('')).toBe(', Label');
+  });
+
+  it('supports IPv6 authorities inside bracketed external-link URLs', () => {
+    const { input, url } = EXPLICIT_URI_ACCEPTANCE_FIXTURES[1];
+    const events = parse(input);
+    const link = expectEnter(events, 'external-link');
+
+    expect(link.props).toEqual({ url });
+    expect(textValues(events, input).join('')).toBe('Loopback');
+  });
+
+  it('supports bracketed external-link URLs for custom opaque URIs too', () => {
+    const { input, url } = EXPLICIT_URI_ACCEPTANCE_FIXTURES[2];
+    const events = parse(input);
+    const link = expectEnter(events, 'external-link');
+
+    expect(link.props).toEqual({ url });
+    expect(textValues(events, input).join('')).toBe('Label');
+  });
+
+  it('keeps explicit bracketed links broader than bare autolinks for opaque URIs', () => {
+    const { input, url } = EXPLICIT_URI_ACCEPTANCE_FIXTURES[3];
+    const events = parse(input);
+    const link = expectEnter(events, 'external-link');
+
+    expect(link.props).toEqual({ url });
     expect(textValues(events, input).join('')).toBe('Label');
   });
 });
