@@ -22,11 +22,12 @@
  *
  * The tree builder keeps tree shape, diagnostics, and recovery metadata as
  * separate result lanes.
- * `buildTree()` returns the loose default tree. `buildTreeWithDiagnostics()`
- * returns the strict diagnostics lane. `buildTreeWithLooseDiagnostics()` keeps
- * the same loose tree shape while still preserving diagnostics.
- * `buildTreeWithRecovery()` adds an explicit `recovered` summary on top of
- * that loose diagnostics lane.
+ * `buildTree()` returns the default tolerant tree. `buildTreeWithDiagnostics()`
+ * keeps that same tree shape while preserving diagnostics.
+ * `buildTreeStrict()` is the conservative materialization lane that collapses
+ * recovery-heavy wrappers back to plain text when the source never clearly
+ * committed to them. `buildTreeWithRecovery()` adds an explicit `recovered`
+ * summary on top of the default diagnostics lane.
  *
  * @example Building a tree from the full event pipeline
  * ```ts
@@ -117,13 +118,53 @@ interface NodeFrame {
 type TreeFrame = RootFrame | NodeFrame;
 
 /**
- * Stable tree-build mode names for consumers that want to refer to the parser's
- * recovery-shape policies without hard-coding string literals.
+ * Stable materialization-policy names for consumers that want to refer to the
+ * parser's public tree-shaping policies without hard-coding string literals.
  */
-export const TreeBuildMode = Object.freeze({
+/** Public map shape for the parser's stable tree-materialization policies. */
+export type TreeMaterializationPolicyMap = Readonly<{
+  DEFAULT_HTML_LIKE: 'default-html-like';
+  SOURCE_STRICT: 'source-strict';
+}>;
+
+const TREE_MATERIALIZATION_POLICY_VALUES: TreeMaterializationPolicyMap = {
+  /** Keep the parser's default tolerant HTML-like materialization. */
+  DEFAULT_HTML_LIKE: 'default-html-like',
+  /** Collapse recovery-heavy wrappers back to plain source-backed text. */
+  SOURCE_STRICT: 'source-strict',
+} as const;
+
+/**
+ * Stable materialization-policy names for the parser's public tree-shaping
+ * policies.
+ */
+export const TreeMaterializationPolicy: TreeMaterializationPolicyMap = Object.freeze(
+  TREE_MATERIALIZATION_POLICY_VALUES,
+);
+
+/** Public map shape for the backward-compatible tree build-mode names. */
+export type TreeBuildModeMap = Readonly<{
+  LOOSE: 'loose';
+  STRICT: 'strict';
+}>;
+
+const TREE_BUILD_MODE_VALUES: TreeBuildModeMap = {
   LOOSE: 'loose',
   STRICT: 'strict',
-} as const);
+} as const;
+
+/**
+ * Backward-compatible alias for the older recovery-shape terminology.
+ *
+ * Prefer {@linkcode TreeMaterializationPolicy} in new code. The old names are
+ * still exported because the internal implementation still uses the compact
+ * `loose` and `strict` mode strings.
+ */
+export const TreeBuildMode: TreeBuildModeMap = Object.freeze(TREE_BUILD_MODE_VALUES);
+
+/** Public names for the tree materialization policies exposed by this module. */
+export type TreeMaterializationPolicy =
+  typeof TreeMaterializationPolicy[keyof typeof TreeMaterializationPolicy];
 
 /**
  * Recovery-shape policy for the final tree.
@@ -253,9 +294,9 @@ export interface ParseDiagnostic {
 /**
  * Tree plus recovery diagnostics.
  *
- * The exact tree shape depends on which diagnostics lane produced it:
- * `buildTreeWithDiagnostics()` returns the strict diagnostics tree, while
- * `buildTreeWithLooseDiagnostics()` returns the loose diagnostics tree.
+ * The exact tree shape depends on which materialization policy produced it.
+ * `buildTreeWithDiagnostics()` returns the default HTML-like tree, while
+ * `buildTreeStrict()` returns the conservative source-strict tree.
  */
 export interface ParseDiagnosticsResult {
   /** Materialized wikist tree. */
@@ -267,7 +308,7 @@ export interface ParseDiagnosticsResult {
 /**
  * Recovery-aware tree result.
  *
- * This is the loose diagnostics lane plus a boolean summary so a caller can
+ * This is the default diagnostics lane plus a boolean summary so a caller can
  * branch on recovery explicitly without rechecking the diagnostics array
  * length itself.
  */
@@ -315,37 +356,17 @@ export function buildTree(
 }
 
 /**
- * Materialize a strict wikist tree and keep recovery diagnostics alongside it.
+ * Materialize the default tolerant wikist tree and keep diagnostics alongside it.
  *
- * This is the diagnostics-first tree-building path for callers that want both
- * the AST and the diagnostics that explain where recovery happened, without
- * also keeping every recovery-created wrapper node in the final tree.
+ * This is the diagnostics-first tree-building path for callers that want the
+ * same HTML-like default tree shape as {@linkcode buildTree}, plus the
+ * diagnostics that explain where malformed input was detected.
  *
- * `strict` here means "strict about keeping only source-committed structure in
- * the final tree," not "strict about accepting input." Recovery still happens.
- *
- * The returned diagnostics include both event-layer recoveries preserved from
- * earlier parser stages and tree-builder-local recoveries such as mismatched
+ * The returned diagnostics include both event-layer findings preserved from
+ * earlier parser stages and tree-builder-local findings such as mismatched
  * exits or EOF auto-closes.
  */
 export function buildTreeWithDiagnostics(
-  events: Iterable<WikitextEvent>,
-  options: BuildTreeOptions,
-): ParseDiagnosticsResult {
-  return materializeDiagnosticsTree(events, options, TreeBuildMode.STRICT);
-}
-
-/**
- * Materialize a loose wikist tree and keep recovery diagnostics alongside it.
- *
- * This is useful when a caller wants the same loose tree shape as
- * {@linkcode buildTree}, but still needs the diagnostics array for inspection,
- * linting, telemetry, or editor UI.
- *
- * Unlike {@linkcode buildTreeWithRecovery}, this result does not add the extra
- * `recovered` summary field.
- */
-export function buildTreeWithLooseDiagnostics(
   events: Iterable<WikitextEvent>,
   options: BuildTreeOptions,
 ): ParseDiagnosticsResult {
@@ -353,10 +374,36 @@ export function buildTreeWithLooseDiagnostics(
 }
 
 /**
+ * Materialize a conservative wikist tree and keep diagnostics alongside it.
+ *
+ * Use this when a caller wants diagnostics, but does not want recovery-heavy
+ * wrappers to survive in the final tree unless the source clearly committed to
+ * them.
+ */
+export function buildTreeStrict(
+  events: Iterable<WikitextEvent>,
+  options: BuildTreeOptions,
+): ParseDiagnosticsResult {
+  return materializeDiagnosticsTree(events, options, TreeBuildMode.STRICT);
+}
+
+/**
+ * Backward-compatible alias for the older loose-diagnostics helper.
+ *
+ * Prefer {@linkcode buildTreeWithDiagnostics} in new code.
+ */
+export function buildTreeWithLooseDiagnostics(
+  events: Iterable<WikitextEvent>,
+  options: BuildTreeOptions,
+): ParseDiagnosticsResult {
+  return buildTreeWithDiagnostics(events, options);
+}
+
+/**
  * Materialize a wikist tree and make recovery explicit in the result shape.
  *
  * This uses the same diagnostics-preserving tree walk as
- * {@linkcode buildTreeWithLooseDiagnostics}, but it also reports whether any
+ * {@linkcode buildTreeWithDiagnostics}, but it also reports whether any
  * recovery happened while producing that tree.
  */
 export function buildTreeWithRecovery(
