@@ -29,7 +29,7 @@ import type { WikitextEvent, EnterEvent, ExitEvent, ErrorEvent } from './events.
 
 /** Collect all events from blockEvents into an array. */
 function parse(input: string): WikitextEvent[] {
-  return [...blockEvents(input, tokenize(input))];
+  return [...blockEvents(input, tokenize(input), { diagnostics: true })];
 }
 
 /**

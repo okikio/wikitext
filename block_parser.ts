@@ -86,9 +86,9 @@ import {
  * stays usable. The only question here is whether this caller also wants the
  * block-owned recovery diagnostics preserved in that stream.
  */
-interface BlockEventOptions {
-  /** Whether block-stage recovery events such as unclosed-table warnings are emitted. */
-  readonly include_diagnostics?: boolean;
+export interface BlockEventOptions {
+  /** Whether block-stage diagnostics such as unclosed-table warnings are emitted. */
+  readonly diagnostics?: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -390,7 +390,7 @@ export function* blockEvents(
   tokens: Iterable<Token>,
   options: BlockEventOptions = {},
 ): Generator<WikitextEvent> {
-  const buf = createBuffer(tokens, options.include_diagnostics !== false);
+  const buf = createBuffer(tokens, options.diagnostics === true);
 
   // Wrap the root document in enter/exit.
   const startPt = pointAt(buf.tracker, 0);
