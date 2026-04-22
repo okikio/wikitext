@@ -12,10 +12,16 @@ import {
   spacing_heavy_wikitext_string,
   wikiish_string,
 } from './_test_utils/arbitraries.ts';
+import {
+  BARE_URI_ACCEPTANCE_FIXTURES,
+  BARE_URI_REJECTION_FIXTURES,
+  EXPLICIT_URI_ACCEPTANCE_FIXTURES,
+} from './_test_utils/uri_fixtures.ts';
 import { UNICODE_TEXT_FIXTURES } from './_test_utils/unicode_fixtures.ts';
 import {
   buildTree,
   buildTreeWithDiagnostics,
+  buildTreeStrict,
   buildTreeWithLooseDiagnostics,
   buildTreeWithRecovery,
   type ParseDiagnosticsResult,
@@ -27,9 +33,10 @@ import {
   errorEvent,
   exitEvent,
   textEvent,
+  type WikitextEvent,
 } from './events.ts';
 import { blockEvents } from './block_parser.ts';
-import { events, outlineEvents, parse, parseWithDiagnostics, parseWithRecovery, tokens } from './parse.ts';
+import { events, outlineEvents, parse, parseStrictWithDiagnostics, parseWithDiagnostics, parseWithRecovery, tokens } from './parse.ts';
 import { tokenize } from './tokenizer.ts';
 
 const COMPLEX_PARSE_FIXTURES = [
@@ -55,6 +62,90 @@ const COMPLEX_PARSE_FIXTURES = [
   ].join('\n'),
 ] as const;
 
+const BLOCK_STRUCTURE_FIXTURES = [
+  ...COMPLEX_PARSE_FIXTURES,
+  'Paragraph with <ref name="cite-1">note',
+  'Paragraph with <ref name="cite-1"',
+  '{|\n| Cell',
+  '== Heading ==\nLine one\nLine two\n\n* Item',
+] as const;
+
+const BLOCK_NODE_TYPE_LOOKUP = new Set([
+  'root',
+  'heading',
+  'paragraph',
+  'preformatted',
+  'list',
+  'list-item',
+  'definition-list',
+  'definition-term',
+  'definition-description',
+  'table',
+  'table-caption',
+  'table-row',
+  'table-cell',
+  'thematic-break',
+  'redirect',
+]);
+
+type TreeLikeNode = {
+  readonly type: string;
+  readonly children?: readonly TreeLikeNode[];
+  readonly url?: string;
+};
+
+function externalLinkUrlsFromTree(root: TreeLikeNode): string[] {
+  const result: string[] = [];
+
+  function walk(node: TreeLikeNode): void {
+    if (node.type === 'external-link' && typeof node.url === 'string') {
+      result.push(node.url);
+    }
+
+    for (const child of node.children ?? []) {
+      walk(child);
+    }
+  }
+
+  walk(root);
+  return result;
+}
+
+function blockStructureFromEvents(stream: Iterable<WikitextEvent>): [string, string][] {
+  const result: [string, string][] = [];
+
+  for (const event of stream) {
+    if ((event.kind === 'enter' || event.kind === 'exit') && BLOCK_NODE_TYPE_LOOKUP.has(event.node_type)) {
+      result.push([event.kind, event.node_type]);
+    }
+  }
+
+  return result;
+}
+
+function blockStructureFromTree(root: TreeLikeNode): [string, string][] {
+  const result: [string, string][] = [];
+
+  function walk(node: TreeLikeNode): void {
+    const is_block = BLOCK_NODE_TYPE_LOOKUP.has(node.type);
+
+    if (is_block) {
+      result.push(['enter', node.type]);
+    }
+
+    for (const child of node.children ?? []) {
+      walk(child);
+    }
+
+    if (is_block) {
+      result.push(['exit', node.type]);
+    }
+  }
+
+  walk(root);
+  return result;
+}
+
 describe('orchestration', () => {
   it('tokens() aliases the tokenizer output', () => {
     const input = '== Heading ==';
@@ -66,7 +157,7 @@ describe('orchestration', () => {
 
   it('outlineEvents() matches the block parser pipeline', () => {
     const input = '== Heading ==\n\nParagraph';
-    const direct = Array.from(blockEvents(input, tokenize(input)));
+    const direct = Array.from(blockEvents(input, tokenize(input), { diagnostics: false }));
     const orchestrated = Array.from(outlineEvents(input));
 
     expect(orchestrated).toEqual(direct);
@@ -79,6 +170,27 @@ describe('orchestration', () => {
       .map((event) => event.node_type);
 
     expect(structure).toContain('wikilink');
+  });
+
+  it('keeps block structure consistent across outlineEvents(), events(), and parse()', () => {
+    for (const input of BLOCK_STRUCTURE_FIXTURES) {
+      const outline_structure = blockStructureFromEvents(outlineEvents(input));
+      const full_structure = blockStructureFromEvents(events(input));
+      const tree_structure = blockStructureFromTree(parse(input));
+
+      expect(full_structure).toEqual(outline_structure);
+      expect(tree_structure).toEqual(outline_structure);
+    }
+  });
+
+  it('preserves the shared URI acceptance matrix in final tree output', () => {
+    for (const fixture of [...BARE_URI_ACCEPTANCE_FIXTURES, ...EXPLICIT_URI_ACCEPTANCE_FIXTURES]) {
+      expect(externalLinkUrlsFromTree(parse(fixture.input))).toContain(fixture.url);
+    }
+
+    for (const input of BARE_URI_REJECTION_FIXTURES) {
+      expect(externalLinkUrlsFromTree(parse(input))).toEqual([]);
+    }
   });
 });
 
@@ -362,7 +474,7 @@ describe('buildTree()', () => {
     expect(result.diagnostics[0].anchor).toEqual({
       kind: 'tree-path',
       path: [0, 0],
-      node_type: 'text',
+      node_type: 'bold',
     });
     expect(result.diagnostics[0].recoverable).toBe(true);
     expect(result.diagnostics[0].source).toBe('tree');
@@ -407,21 +519,30 @@ describe('buildTree()', () => {
     expect(result.diagnostics[0].anchor).toEqual({
       kind: 'tree-path',
       path: [0],
-      node_type: 'text',
+      node_type: 'paragraph',
     });
   });
 
-  it('buildTreeWithLooseDiagnostics() keeps the loose tree while preserving diagnostics', () => {
+  it('buildTreeWithLooseDiagnostics() stays as a compatibility alias for buildTreeWithDiagnostics()', () => {
     const input = '{|\n| Cell';
-    const loose_result = buildTreeWithLooseDiagnostics(events(input), { source: input });
-    const strict_result = buildTreeWithDiagnostics(events(input), { source: input });
-    const recovery_result = buildTreeWithRecovery(events(input), { source: input });
+    const event_stream = events(input, { diagnostics: true });
+    const loose_result = buildTreeWithLooseDiagnostics(event_stream, { source: input });
+    const diagnostics_result = buildTreeWithDiagnostics(events(input, { diagnostics: true }), { source: input });
+    const recovery_result = buildTreeWithRecovery(events(input, { diagnostics: true }), { source: input });
 
     expect(Object.hasOwn(loose_result, 'recovered')).toBe(false);
     expect(loose_result.diagnostics).toEqual(recovery_result.diagnostics);
-    expect(loose_result.tree).toEqual(recovery_result.tree);
+    expect(loose_result.tree).toEqual(diagnostics_result.tree);
     expect(loose_result.tree.children[0]?.type).toBe('table');
+    expect(diagnostics_result.tree.children[0]?.type).toBe('table');
+  });
+
+  it('buildTreeStrict() keeps diagnostics while collapsing recovery-heavy wrappers', () => {
+    const input = '{|\n| Cell';
+    const strict_result = buildTreeStrict(events(input, { diagnostics: true }), { source: input });
+
     expect(strict_result.tree.children[0]?.type).toBe('text');
+    expect(strict_result.diagnostics[0]?.anchor.node_type).toBe('text');
   });
 });
 
@@ -685,7 +806,7 @@ describe('parseWithDiagnostics()', () => {
     expect(result.diagnostics[0].anchor).toEqual({
       kind: 'tree-path',
       path: [0],
-      node_type: 'text',
+      node_type: 'table',
     });
     expect(result.diagnostics[0].recoverable).toBe(true);
     expect(result.diagnostics[0].severity).toBe('warning');
@@ -715,7 +836,7 @@ describe('parseWithDiagnostics()', () => {
     expect(result.diagnostics[0].source).toBe('inline');
     expect(result.diagnostics[0].recoverable).toBe(true);
     expect(result.diagnostics[0].severity).toBe('warning');
-    expect(result.diagnostics[0].anchor.node_type).toBe('text');
+    expect(result.diagnostics[0].anchor.node_type).toBe('reference');
   });
 
   it('keeps the same tree as parse() when no diagnostics were emitted', () => {
@@ -736,9 +857,44 @@ describe('parseWithDiagnostics()', () => {
     );
   });
 
-  it('keeps missing-close tags as plain text instead of recovered nodes', () => {
+  it('keeps missing-close tags as structurally real nodes in the default diagnostics lane', () => {
     const input = 'Paragraph with <ref name="cite-1">note';
     const result = parseWithDiagnostics(input);
+
+    expect(JSON.stringify(result.tree)).toContain('"type":"reference"');
+  });
+
+  it('keeps unclosed tables as recovered table nodes in the default diagnostics lane', () => {
+    const input = '{|\n| Cell';
+    const result = parseWithDiagnostics(input);
+
+    expect(result.tree.children[0]?.type).toBe('table');
+  });
+
+  it('keeps the default block structure stable when inline recovery happens', () => {
+    const input = 'Paragraph with <ref name="cite-1">note';
+    const outline_structure = blockStructureFromEvents(outlineEvents(input));
+    const diagnostics_result = parseWithDiagnostics(input);
+    const recovery_result = parseWithRecovery(input);
+
+    expect(blockStructureFromTree(diagnostics_result.tree)).toEqual(outline_structure);
+    expect(blockStructureFromTree(recovery_result.tree)).toEqual(outline_structure);
+  });
+});
+
+describe('parseStrictWithDiagnostics()', () => {
+  it('preserves the same diagnostics as parseWithDiagnostics()', () => {
+    for (const input of COMPLEX_PARSE_FIXTURES) {
+      const diagnostics_result = parseWithDiagnostics(input);
+      const strict_result = parseStrictWithDiagnostics(input);
+
+      expect(strict_result.diagnostics).toEqual(diagnostics_result.diagnostics);
+    }
+  });
+
+  it('keeps missing-close tags as plain text instead of recovered nodes', () => {
+    const input = 'Paragraph with <ref name="cite-1">note';
+    const result = parseStrictWithDiagnostics(input);
 
     expect(JSON.stringify(result.tree)).not.toContain('"type":"reference"');
     expect(result.tree.children[0]?.type).toBe('text');
@@ -748,21 +904,41 @@ describe('parseWithDiagnostics()', () => {
 
   it('keeps unclosed tables as plain text instead of recovered table nodes', () => {
     const input = '{|\n| Cell';
-    const result = parseWithDiagnostics(input);
+    const result = parseStrictWithDiagnostics(input);
 
     expect(result.tree.children[0]?.type).toBe('text');
     if (result.tree.children[0]?.type !== 'text') return;
     expect(result.tree.children[0].value).toBe(input);
   });
+
+  it('may diverge from the structural overlay when a committed malformed region collapses to text', () => {
+    const input = 'Paragraph with <ref name="cite-1">note';
+    const outline_structure = blockStructureFromEvents(outlineEvents(input));
+    const strict_result = parseStrictWithDiagnostics(input);
+
+    expect(blockStructureFromTree(strict_result.tree)).not.toEqual(outline_structure);
+    expect(strict_result.tree.children[0]?.type).toBe('text');
+  });
+
+  it('matches the default tree when the source never reaches the commitment point', () => {
+    const input = 'Paragraph with <ref name="cite-1"';
+    const default_tree = parse(input);
+    const diagnostics_tree = parseWithDiagnostics(input).tree;
+    const strict_tree = parseStrictWithDiagnostics(input).tree;
+
+    expect(diagnostics_tree).toEqual(default_tree);
+    expect(strict_tree).toEqual(default_tree);
+  });
 });
 
 describe('parseWithRecovery()', () => {
-  it('adds recovery-shaped tree changes on top of parseWithDiagnostics()', () => {
+  it('adds the recovery summary on top of parseWithDiagnostics()', () => {
     for (const input of COMPLEX_PARSE_FIXTURES) {
       const diagnostics_result = parseWithDiagnostics(input);
       const recovery_result = parseWithRecovery(input);
 
       expect(recovery_result.diagnostics).toEqual(diagnostics_result.diagnostics);
+      expect(recovery_result.tree).toEqual(diagnostics_result.tree);
       expect(recovery_result.recovered).toBe(diagnostics_result.diagnostics.length > 0);
     }
   });
@@ -781,10 +957,11 @@ describe('parseWithRecovery()', () => {
     expect(result.diagnostics.length).toBeGreaterThan(0);
   });
 
-  it('keeps recovery-specific wrapper nodes that parseWithDiagnostics() strips', () => {
+  it('keeps the same default tree shape as parseWithDiagnostics()', () => {
     const input = 'Paragraph with <ref name="cite-1">note';
     const result = parseWithRecovery(input);
 
     expect(JSON.stringify(result.tree)).toContain('"type":"reference"');
+    expect(result.tree).toEqual(parseWithDiagnostics(input).tree);
   });
 });

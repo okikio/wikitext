@@ -12,16 +12,15 @@
  * tokens(source)               -> raw tokenizer output
  * outlineEvents(source)        -> block structure only
  * events(source)               -> block + inline event stream
- * parse(source)                -> loose full tree
- * parseWithDiagnostics(source) -> strict tree + diagnostics
- * parseWithRecovery(source)    -> recovered tree + recovered + diagnostics
+ * parse(source)                -> default tree
+ * parseWithDiagnostics(source) -> default tree + diagnostics
+ * parseStrictWithDiagnostics(source) -> conservative tree + diagnostics
+ * parseWithRecovery(source)    -> default tree + recovered + diagnostics
  * ```
  *
- * `strict` and `loose` describe recovery shape, not parser acceptance. Both
- * lanes still recover and still return a valid tree.
- *
- * That keeps the cost model visible. Callers can stop at the cheapest layer
- * that answers their question instead of always paying for a full tree.
+ * The key split is now diagnostic emission first, then materialization policy.
+ * If a caller does not want diagnostics, the block and inline stages should
+ * not emit diagnostic events for that lane.
  *
  * @example Walking the full event stream
  * ```ts
@@ -44,17 +43,32 @@ import type { ParseDiagnosticsResult, ParseResult } from './tree_builder.ts';
 import { tokenize } from './tokenizer.ts';
 import { blockEvents } from './block_parser.ts';
 import { inlineEvents } from './inline_parser.ts';
-import { buildTree, buildTreeWithDiagnostics, buildTreeWithRecovery } from './tree_builder.ts';
+import { buildTree, buildTreeStrict, buildTreeWithDiagnostics, buildTreeWithRecovery } from './tree_builder.ts';
+
+/**
+ * Public switches for event-stream production.
+ *
+ * The main cost choice here is whether parser diagnostics should be emitted at
+ * all. If `diagnostics` is omitted or `false`, the block and inline
+ * stages stay on the cheapest event lane and do not emit `error` events.
+ */
+export interface EventOptions {
+  /** Whether block and inline stages should emit diagnostic events. */
+  readonly diagnostics?: boolean;
+}
 
 /**
  * Internal event-pipeline switches used to keep the public API cost-aware.
  *
- * The parser has three public tree lanes:
+ * The parser exposes one default tree lane and two diagnostics-preserving
+ * variants built on the same event pipeline.
  *
  * ```text
- * parse()                -> no diagnostics, loose recovery shape
- * parseWithDiagnostics() -> diagnostics on, strict recovery shape
- * parseWithRecovery()    -> diagnostics on, loose recovery shape
+ * parse()                -> default tree, no diagnostics
+ * parseWithDiagnostics() -> default tree + diagnostics
+ * parseStrictWithDiagnostics()
+ *                        -> conservative tree + diagnostics
+ * parseWithRecovery()    -> default tree + diagnostics + recovered summary
  * ```
  *
  * These options are the plumbing that keeps those lanes honest. Without them,
@@ -62,10 +76,10 @@ import { buildTree, buildTreeWithDiagnostics, buildTreeWithRecovery } from './tr
  * the same underlying work.
  */
 interface EventPipelineOptions {
-  /** Whether block and inline stages should emit recovery diagnostics. */
-  readonly include_diagnostics?: boolean;
-  /** Whether recoverable inline/tree structures stay loose or collapse to text. */
-  readonly recovery_style?: 'loose' | 'strict';
+  /** Whether block and inline stages should emit parser diagnostics. */
+  readonly diagnostics?: boolean;
+  /** Whether malformed inline/tree regions keep the default tree overlay or collapse to text. */
+  readonly recovery?: 'default' | 'conservative';
 }
 
 /**
@@ -84,10 +98,11 @@ export function tokens(source: TextSource): Generator<Token> {
  * Inline content remains plain text ranges. This is the cheap structural mode
  * for outlines, table-of-contents extraction, and other block-focused tools.
  */
-export function outlineEvents(source: TextSource): Generator<WikitextEvent> {
-  return outlineEventsWithOptions(source, {
-    include_diagnostics: true,
-  });
+export function outlineEvents(
+  source: TextSource,
+  options: EventOptions = {},
+): Generator<WikitextEvent> {
+  return outlineEventsWithOptions(source, options);
 }
 
 /**
@@ -96,10 +111,13 @@ export function outlineEvents(source: TextSource): Generator<WikitextEvent> {
  * This is the default event-level API. It runs the tokenizer, block parser,
  * and inline enrichment in order.
  */
-export function events(source: TextSource): Generator<WikitextEvent> {
+export function events(
+  source: TextSource,
+  options: EventOptions = {},
+): Generator<WikitextEvent> {
   return eventsWithOptions(source, {
-    include_diagnostics: true,
-    recovery_style: 'loose',
+    diagnostics: options.diagnostics,
+    recovery: 'default',
   });
 }
 
@@ -108,7 +126,7 @@ function outlineEventsWithOptions(
   options: EventPipelineOptions,
 ): Generator<WikitextEvent> {
   return blockEvents(source, tokenize(source), {
-    include_diagnostics: options.include_diagnostics,
+    diagnostics: options.diagnostics,
   });
 }
 
@@ -142,8 +160,8 @@ function eventsFromOutline(
   options: EventPipelineOptions,
 ): Generator<WikitextEvent> {
   return inlineEvents(source, outline, {
-    include_diagnostics: options.include_diagnostics,
-    recovery_style: options.recovery_style,
+    diagnostics: options.diagnostics,
+    recovery: options.recovery,
   });
 }
 
@@ -153,42 +171,46 @@ function eventsFromOutline(
  * This is the convenience API for callers that want a full AST and do not need
  * to inspect the intermediate event stream themselves.
  *
- * It is also the cheapest tree-building lane. It does not request recovery
- * diagnostics from the block or inline stages, and it keeps the loose tree
- * shape when recovery is needed internally.
- *
- * `loose` means the final tree keeps more recovered wrapper structure when the
- * parser can still infer something usable from the source.
+ * It is also the cheapest tree-building lane. It does not request diagnostics
+ * from the block or inline stages, and it keeps the default tolerant
+ * HTML-like tree shape when malformed input is encountered.
  *
  * If the caller also needs diagnostics or explicit recovery metadata, use
  * {@linkcode parseWithDiagnostics} or {@linkcode parseWithRecovery} instead.
  */
 export function parse(source: TextSource): WikistRoot {
   return buildTree(eventsWithOptions(source, {
-    include_diagnostics: false,
-    recovery_style: 'loose',
+    diagnostics: false,
+    recovery: 'default',
   }), { source });
 }
 
 /**
- * Parse source text into a strict wikist tree and keep recovery diagnostics.
+ * Parse source text into the default wikist tree and keep diagnostics.
  *
- * This is the diagnostics-focused entry point. It returns a stricter
- * tree than {@linkcode parse} when recovery would otherwise synthesize wrapper
- * nodes, plus the diagnostics that explain those recovery points.
- *
- * `strict` means the final tree is stricter about preserving only structure
- * that the source clearly committed to. Recovery still happens, but
- * recovery-heavy wrappers are more likely to collapse back to plain text.
- *
- * In practical terms, this is the lane to use when a caller wants to surface
- * problems to a user, lint malformed input, or inspect where recovery happened
- * without fully committing to the loose recovered shape.
+ * This is the diagnostics-first entry point. It preserves the same default
+ * HTML-like tree shape as {@linkcode parse}, but also returns the diagnostics
+ * that describe malformed input and parser continuation points.
  */
 export function parseWithDiagnostics(source: TextSource): ParseDiagnosticsResult {
   return buildTreeWithDiagnostics(eventsWithOptions(source, {
-    include_diagnostics: true,
-    recovery_style: 'strict',
+    diagnostics: true,
+    recovery: 'default',
+  }), { source });
+}
+
+/**
+ * Parse source text into a conservative tree and keep diagnostics.
+ *
+ * This is the source-strict materialization lane. It still keeps diagnostics
+ * and still follows the never-throw contract, but recovery-heavy wrappers are
+ * more likely to collapse back to plain text when the source never clearly
+ * committed to them.
+ */
+export function parseStrictWithDiagnostics(source: TextSource): ParseDiagnosticsResult {
+  return buildTreeStrict(eventsWithOptions(source, {
+    diagnostics: true,
+    recovery: 'conservative',
   }), { source });
 }
 
@@ -196,33 +218,31 @@ export function parseWithDiagnostics(source: TextSource): ParseDiagnosticsResult
  * Parse source text into a wikist tree and report whether recovery happened.
  *
  * This is the explicit recovery-aware entry point. It returns the same
- * loose tree as {@linkcode parse}, plus a `recovered` flag and the
+ * default tree as {@linkcode parse}, plus a `recovered` flag and the
  * diagnostics that explain what the parser had to do on the caller's behalf.
  *
  * Read the result like two coordinated lanes:
  *
  * ```text
  * source
- *   ├─► parse()                 -> loose tree only
- *   ├─► parseWithDiagnostics()  -> strict tree + diagnostics
- *   └─► parseWithRecovery()     -> recovered tree + recovered + diagnostics
+ *   ├─► parse()                 -> tree only
+ *   ├─► parseWithDiagnostics()  -> tree + diagnostics
+ *   ├─► parseStrictWithDiagnostics()
+ *   │                          -> conservative tree + diagnostics
+ *   └─► parseWithRecovery()     -> tree + recovered + diagnostics
  * ```
  *
  * The important distinction from `parseWithDiagnostics()` is not just the
- * extra boolean. This lane also keeps the loose recovered tree itself.
- * That makes it the right fit for tolerant rendering, content transforms, or
- * downstream tools that want best-effort structure plus an explicit signal
- * that recovery happened.
+ * extra boolean. This lane adds an explicit summary field for consumers that
+ * want the parser's tolerant default behavior to stay visible in control flow.
  *
  * The diagnostics include a narrow `anchor` so downstream tools can resolve
  * the nearest node around the recovery point.
  *
- * Today those diagnostics mostly come from block-parser recovery events and
- * tree-builder recovery steps. `parse()` intentionally drops them,
- * `parseWithDiagnostics()` preserves them while stripping recovery-created
- * wrapper nodes back to strict text ranges where possible, and
- * `parseWithRecovery()` keeps the more aggressively recovered tree plus the
- * explicit `recovered` summary.
+ * Today those diagnostics mostly come from block-parser findings and
+ * tree-builder continuation steps. `parse()` intentionally drops them,
+ * `parseWithDiagnostics()` preserves them with the default tree, and
+ * `parseWithRecovery()` adds the explicit `recovered` summary.
  *
  * That anchor is intentionally tree-only today. Edit-stable anchor semantics
  * belong to later session/edit tracking work and are not part of this public
@@ -230,7 +250,7 @@ export function parseWithDiagnostics(source: TextSource): ParseDiagnosticsResult
  */
 export function parseWithRecovery(source: TextSource): ParseResult {
   return buildTreeWithRecovery(eventsWithOptions(source, {
-    include_diagnostics: true,
-    recovery_style: 'loose',
+    diagnostics: true,
+    recovery: 'default',
   }), { source });
 }
