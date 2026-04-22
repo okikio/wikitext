@@ -216,6 +216,140 @@ incremental parsing, different architectural goals.
 Deserves side-by-side benchmarking, not just footnote mention.
 
 
+## Lessons from other parser families
+
+The useful question is not "which parser architecture wins in the abstract?"
+The useful question is which parts of each family solve the specific failure
+modes that wikitext creates.
+
+Wikitext is not a good fit for a pure compiler-parser mental model, because it
+has too much context-sensitive legacy syntax and too many malformed-but-still-
+intended inputs. It is also not a good fit for a pure Markdown fallback model,
+because many malformed constructs should still count as real structure once the
+source has clearly committed to them. The closest practical reference is a
+hybrid:
+
+- event-stream-first like micromark or pulldown-cmark
+- commitment-point-aware like HTML parsers
+- corpus-driven like MediaWiki and Parsoid
+
+```text
+compiler parsers      markdown parsers      HTML and Parsoid
+grammar certainty     line heuristics       commitment + recovery
+       \                   |                    /
+        \                  |                   /
+         \                 |                  /
+          └──── wikitext needs a hybrid: token/event-first,
+                explicit commitment points, tolerant defaults,
+                and a stricter materialization lane
+```
+
+### Compiler-style parsers teach commitment and contracts
+
+Compiler parsers such as Babel, SWC, and Oxc are usually hand-written,
+recursive-descent, and extremely explicit about spans, ambiguity handling, and
+error recovery boundaries.
+
+That does not mean wikitext should imitate their exact control flow. It means
+this repo should keep borrowing the parts that scale:
+
+- explicit commitment points before a construct becomes structurally real
+- narrow, stable diagnostic codes
+- spans and offsets treated as first-class contracts
+- a hard separation between syntax findings and later semantic use
+
+The key translation for this repo is that a construct should not become a node
+just because the parser saw a suspicious opener. It becomes structurally real
+when the source reaches the point where a reasonable reader would say, "yes,
+this is now intended markup unless later text proves otherwise."
+
+### Markdown parsers teach layered pipelines and corpus discipline
+
+Large Markdown parsers disagree on internal shape, but their strongest shared
+lesson is operational rather than philosophical: serious parsers survive by
+growing around corpora.
+
+From cmark, micromark, goldmark, Comrak, and similar projects, the useful
+lessons are:
+
+- keep block and inline responsibilities explicit
+- make extension seams narrow and layered
+- preserve source positions even when later consumers want friendlier values
+- grow tests by category, not only by syntax feature
+
+The warning from Markdown land is just as important: many Markdown parsers can
+fall back to plain text for unknown or malformed constructs because Markdown is
+often defined by that permissive rule. Wikitext cannot always do that. If the
+source already looks like committed table, tag, template, or link syntax, the
+default lane should often preserve that structure and attach diagnostics rather
+than flattening it immediately.
+
+### HTML parsers teach forgiving commitment without guessing too early
+
+HTML parsing is a better model for this repo's malformed-input philosophy than
+Markdown is.
+
+The useful HTML lesson is not "copy the WHATWG parser." The useful lesson is
+that tolerant parsing can still be disciplined:
+
+- before commitment, keep text-backed interpretation
+- after commitment, preserve structural intent
+- on malformed continuation, emit diagnostics and continue predictably
+- let downstream consumers decide how conservative materialization should be
+
+That maps cleanly onto the current direction:
+
+- default tree lane: keep the HTML-like tolerant structural overlay
+- strict tree lane: collapse recovery-heavy wrappers back to source-backed text
+- diagnostic lane: preserve the parser's factual findings regardless of which
+  tree materialization a caller chooses
+
+### MediaWiki and Parsoid teach where truth actually comes from
+
+For wikitext, correctness does not come mainly from a neat grammar. It comes
+from a long-lived corpus of examples, regressions, extension interactions, and
+round-trip expectations.
+
+MediaWiki core parser tests and Parsoid parser tests are useful because they do
+not only test happy paths. They cover:
+
+- canonical constructs
+- ugly real-world edge cases
+- malformed-but-still-meaningful markup
+- extension-specific behavior
+- round-trip and edited-round-trip workflows
+
+This is exactly the kind of corpus pressure this repo needs. The parser should
+not wait until the architecture is "finished" before adopting that discipline.
+The architecture gets validated by surviving those corpora.
+
+### What this means for this repo
+
+The current direction still looks right:
+
+- keep the tokenizer, block parser, and inline parser hand-written
+- keep events as the primary interchange layer
+- treat diagnostics as parser facts
+- treat tolerant versus conservative tree shape as materialization policy
+- keep extension hooks narrow and primitive-first
+
+The main refinement is philosophical, not structural: default tolerant parsing
+should stay closer to HTML-like commitment and continuation than to Markdown's
+common "unknown becomes text" instinct.
+
+That leads directly to two concrete follow-ups:
+
+- use upstream corpora as a deliberate test matrix, not as a pile of ad hoc
+  fixture imports
+- document the broader product direction so parser choices are judged against
+  future consumers such as extraction, document composition, and editor-facing
+  tooling
+
+The concrete corpus plan lives in [docs/corpus-matrix.md](./corpus-matrix.md).
+The broader direction note lives in
+[docs/future-direction.md](./future-direction.md).
+
+
 ## Ecosystem integration
 
 ### unist (Universal Syntax Tree)
