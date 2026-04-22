@@ -18,16 +18,20 @@
  * - `blockEvents()` for block-level structure
  * - `inlineEvents()` for inline event enrichment
  * - `tokens()`, `outlineEvents()`, `events()`, `parse()`,
- *   `parseWithDiagnostics()`, and `parseWithRecovery()` for orchestration
- * - `buildTree()`, `buildTreeWithDiagnostics()`,
+ *   `parseWithDiagnostics()`, `parseStrictWithDiagnostics()`, and
+ *   `parseWithRecovery()` for
+ *   orchestration
+ * - `buildTree()`, `buildTreeWithDiagnostics()`, `buildTreeStrict()`,
  *   `buildTreeWithLooseDiagnostics()`, and `buildTreeWithRecovery()` for AST
  *   materialization from an event stream plus source
- * - `TreeBuildMode`, `DiagnosticCode`, and related result types for stable
- *   parser-owned vocabularies and tree/diagnostic result shapes
+ * - `TreeMaterializationPolicy`, `TreeBuildMode`, `DiagnosticCode`, and
+ *   related result types for stable parser-owned vocabularies and
+ *   tree/diagnostic result shapes
  * - `visit()`, `filter()`, `resolveTreePath()`, `resolveDiagnosticAnchor()`,
  *   and `locateDiagnostic()` helpers for common tree and event queries
  * - `createSession()` for cached repeated access to one source input,
- *   including `session.parseWithDiagnostics()` and
+ *   including `session.parseWithDiagnostics()`,
+ *   `session.parseStrictWithDiagnostics()`, and
  *   `session.parseWithRecovery()`
  *
  * As more features land, this entry point is where they will be re-exported.
