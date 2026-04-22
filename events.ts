@@ -135,7 +135,17 @@ export type DiagnosticSeverity = 'error' | 'warning';
  * emit any string through `ErrorEvent.code` or `ParseDiagnostic.code` without
  * mutating the shared parser-owned constant map.
  */
-export const DiagnosticCode = Object.freeze({
+/** Public map shape for the parser's stable diagnostic-code vocabulary. */
+export type DiagnosticCodeMap = Readonly<{
+  UNCLOSED_TABLE: 'UNCLOSED_TABLE';
+  INLINE_TAG_UNTERMINATED_OPENER: 'INLINE_TAG_UNTERMINATED_OPENER';
+  INLINE_TAG_MISSING_CLOSE: 'INLINE_TAG_MISSING_CLOSE';
+  TREE_MISMATCHED_EXIT: 'TREE_MISMATCHED_EXIT';
+  TREE_ORPHAN_EXIT: 'TREE_ORPHAN_EXIT';
+  TREE_EOF_AUTOCLOSE: 'TREE_EOF_AUTOCLOSE';
+}>;
+
+const DIAGNOSTIC_CODE_VALUES: DiagnosticCodeMap = {
   /**
    * The block parser reached end of input before a table closed with `|}`.
    *
@@ -199,7 +209,15 @@ export const DiagnosticCode = Object.freeze({
    * tree builder auto-closed them at their last known end point.
    */
   TREE_EOF_AUTOCLOSE: 'TREE_EOF_AUTOCLOSE',
-} as const);
+} as const;
+
+/**
+ * Stable machine-readable diagnostic codes emitted by the parser today.
+ *
+ * Match on these values when a consumer needs parser-owned diagnostics that
+ * stay stable across messages and formatting changes.
+ */
+export const DiagnosticCode: DiagnosticCodeMap = Object.freeze(DIAGNOSTIC_CODE_VALUES);
 
 /**
  * Known machine-readable diagnostic codes emitted by the current parser.
