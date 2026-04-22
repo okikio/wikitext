@@ -72,7 +72,13 @@ export interface TreePathResolution {
   readonly index?: number;
 }
 
-type MatchableNode =
+/**
+ * Node types whose user-facing identity can be matched by {@linkcode matches}.
+ *
+ * Some of these nodes expose that identity through `name`, others through
+ * `target`, but they all support the same normalized name comparison helper.
+ */
+export type MatchableNode =
   | Argument
   | BehaviorSwitch
   | CategoryLink

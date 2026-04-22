@@ -9,6 +9,7 @@
     "bench:core": "deno bench --allow-sys --allow-env=NODE_DISABLE_COLORS --v8-flags=--expose-gc mod_bench.ts",
     "bench:block": "deno bench --allow-sys --allow-env=NODE_DISABLE_COLORS --v8-flags=--expose-gc block_parser_bench.ts",
     "bench:inline": "deno bench --allow-sys --allow-env=NODE_DISABLE_COLORS --v8-flags=--expose-gc inline_parser_bench.ts",
+    "bench:filter": "deno bench --allow-sys --allow-env=NODE_DISABLE_COLORS --v8-flags=--expose-gc filter_bench.ts",
     "bench:tree": "deno bench --allow-sys --allow-env=NODE_DISABLE_COLORS --v8-flags=--expose-gc tree_builder_bench.ts",
     "bench:parse": "deno bench --allow-sys --allow-env=NODE_DISABLE_COLORS --v8-flags=--expose-gc parse_bench.ts",
     "bench:session": "deno bench --allow-sys --allow-env=NODE_DISABLE_COLORS --v8-flags=--expose-gc session_bench.ts",

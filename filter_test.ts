@@ -94,7 +94,7 @@ describe('diagnostic helpers', () => {
     const result = parseWithDiagnostics('{|\n| Cell');
     const location = locateDiagnostic(result.tree, result.diagnostics[0]);
 
-    expect(location?.node.type).toBe('text');
+    expect(location?.node.type).toBe('table');
     expect(location?.parent?.type).toBe('root');
     expect(location?.index).toBe(0);
   });
@@ -106,7 +106,7 @@ describe('diagnostic helpers', () => {
       result.diagnostics[0].anchor,
     );
 
-    expect(location?.node.type).toBe('text');
+    expect(location?.node.type).toBe('table');
     expect(location?.parent?.type).toBe('root');
     expect(location?.index).toBe(0);
   });
