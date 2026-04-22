@@ -83,7 +83,50 @@
  * later become a wikilink, a category link, or a file link depending on the
  * surrounding parse rules.
  */
-export const TokenType = Object.freeze({
+/** Public map shape for the stable tokenizer token vocabulary. */
+export type TokenTypeMap = Readonly<{
+  TEXT: 'TEXT';
+  NEWLINE: 'NEWLINE';
+  WHITESPACE: 'WHITESPACE';
+  HEADING_MARKER: 'HEADING_MARKER';
+  HEADING_MARKER_CLOSE: 'HEADING_MARKER_CLOSE';
+  BULLET: 'BULLET';
+  HASH: 'HASH';
+  COLON: 'COLON';
+  SEMICOLON: 'SEMICOLON';
+  THEMATIC_BREAK: 'THEMATIC_BREAK';
+  TABLE_OPEN: 'TABLE_OPEN';
+  TABLE_CLOSE: 'TABLE_CLOSE';
+  TABLE_ROW: 'TABLE_ROW';
+  TABLE_CAPTION: 'TABLE_CAPTION';
+  PIPE: 'PIPE';
+  DOUBLE_PIPE: 'DOUBLE_PIPE';
+  TABLE_HEADER_CELL: 'TABLE_HEADER_CELL';
+  DOUBLE_BANG: 'DOUBLE_BANG';
+  APOSTROPHE_RUN: 'APOSTROPHE_RUN';
+  LINK_OPEN: 'LINK_OPEN';
+  LINK_CLOSE: 'LINK_CLOSE';
+  EXT_LINK_OPEN: 'EXT_LINK_OPEN';
+  EXT_LINK_CLOSE: 'EXT_LINK_CLOSE';
+  TEMPLATE_OPEN: 'TEMPLATE_OPEN';
+  TEMPLATE_CLOSE: 'TEMPLATE_CLOSE';
+  ARGUMENT_OPEN: 'ARGUMENT_OPEN';
+  ARGUMENT_CLOSE: 'ARGUMENT_CLOSE';
+  TAG_OPEN: 'TAG_OPEN';
+  TAG_CLOSE: 'TAG_CLOSE';
+  CLOSING_TAG_OPEN: 'CLOSING_TAG_OPEN';
+  SELF_CLOSING_TAG_END: 'SELF_CLOSING_TAG_END';
+  COMMENT_OPEN: 'COMMENT_OPEN';
+  COMMENT_CLOSE: 'COMMENT_CLOSE';
+  HTML_ENTITY: 'HTML_ENTITY';
+  SIGNATURE: 'SIGNATURE';
+  BEHAVIOR_SWITCH: 'BEHAVIOR_SWITCH';
+  PREFORMATTED_MARKER: 'PREFORMATTED_MARKER';
+  EQUALS: 'EQUALS';
+  EOF: 'EOF';
+}>;
+
+const TOKEN_TYPE_VALUES: TokenTypeMap = {
   // -- Text and whitespace --
 
   /** Literal text content (no special wiki meaning at this position). */
@@ -210,7 +253,15 @@ export const TokenType = Object.freeze({
 
   /** Signals end of the token stream. */
   EOF: 'EOF',
-} as const);
+} as const;
+
+/**
+ * Stable token-type names emitted by the tokenizer.
+ *
+ * These names describe the raw token shapes the scanner recognized, not the
+ * final meaning a later parser stage may assign to them.
+ */
+export const TokenType: TokenTypeMap = Object.freeze(TOKEN_TYPE_VALUES);
 
 /**
  * Union of all token type string literals.
