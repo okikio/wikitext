@@ -29,11 +29,17 @@ import type { TextSource } from './text_source.ts';
 import type { WikitextEvent } from './events.ts';
 import type { WikistRoot } from './ast.ts';
 import type { ParseDiagnosticsResult, ParseResult } from './tree_builder.ts';
+import type {
+  AnalyzeOptions,
+  MaterializeOptions,
+  ParseFindings,
+  ParseOutput,
+} from './parse.ts';
 
 import { blockEvents } from './block_parser.ts';
-import { inlineEvents } from './inline_parser.ts';
 import { tokenize } from './tokenizer.ts';
 import { buildTree, buildTreeStrict, buildTreeWithDiagnostics, buildTreeWithRecovery } from './tree_builder.ts';
+import { eventsFromOutline, recoveriesFromDiagnostics } from './parse.ts';
 
 /**
  * Public switches for cached event-stream access.
@@ -54,12 +60,12 @@ export interface SessionStreamOptions {
  * separate caches for the cheap tree-only lane and the diagnostics-enabled
  * lanes so callers do not accidentally pay for diagnostics they never asked
  * for.
+ *
+ * @internal
  */
-interface SessionEventOptions {
+export interface SessionEventOptions {
   /** Whether this lane wants event-level parser diagnostics preserved. */
   readonly diagnostics: boolean;
-  /** Whether this lane wants the default or conservative tree materialization. */
-  readonly recovery: 'default' | 'conservative';
 }
 
 /**
@@ -135,16 +141,36 @@ export interface Session {
   * tolerant default behavior to stay explicit in their own control flow.
    */
   parseWithRecovery(): ParseResult;
+
+  /**
+   * Return the cached findings-first result.
+   *
+   * This is the same shape as top-level {@linkcode analyze}, but the session
+   * remembers the parsed events so repeated calls do not reparse. When
+   * `options.recovery` is `false`, the cached recovery list is dropped from
+   * the returned findings so callers only pay for the metadata they ask for.
+   */
+  analyze(options?: AnalyzeOptions): ParseFindings;
+
+  /**
+   * Materialize a tree from cached findings.
+   *
+   * This is the session-friendly equivalent of top-level
+   * {@linkcode materialize}. The session reuses whichever tree cache already
+   * exists for the requested policy, so calling this repeatedly with the same
+   * policy does not rebuild the tree.
+   */
+  materialize(options?: MaterializeOptions): ParseOutput;
 }
 
 /**
- * Concrete cache wrapper for one immutable source input.
+ * Concrete session implementation for one immutable source input.
  *
  * The caches are layered, but lane-aware rather than fully shared:
  *
  * ```text
- * diagnostics outline + default/conservative event caches -> diagnostics, conservative, and recovery results
- * cheap tree-only or reusable default events cache        -> parse()
+ * diagnostics outline + diagnostics events -> diagnostics, conservative, and recovery results
+ * cheap tree-only or reusable default events cache -> parse()
  * ```
  *
  * That shape matters because it keeps `parse()` cheap when the caller does not
@@ -154,23 +180,24 @@ export interface Session {
  * Read the cache graph like this:
  *
  * - default outline and default events back the cheapest no-diagnostics lane
- * - diagnostics-enabled default events back both `parseWithDiagnostics()` and
- *   `parseWithRecovery()`
- * - conservative events back `parseStrictWithDiagnostics()`
- * - tree-level caches reuse whichever of those lanes already exists so one
- *   caller does not repay the same materialization cost twice
+ * - diagnostics-enabled events back `parseWithDiagnostics()`,
+ *   `parseWithRecovery()`, and `parseStrictWithDiagnostics()`
+ * - tree-level caches reuse whichever tree lane already exists so one caller
+ *   does not repay the same materialization cost twice
+ *
+ * @internal
  */
-class BasicSession implements Session {
+export class BasicSession implements Session {
   readonly source: TextSource;
   #outline_cache?: WikitextEvent[];
   #diagnostic_outline_cache?: WikitextEvent[];
   #event_cache?: WikitextEvent[];
   #diagnostic_event_cache?: WikitextEvent[];
-  #conservative_event_cache?: WikitextEvent[];
   #tree_cache?: WikistRoot;
   #diagnostics_cache?: ParseDiagnosticsResult;
   #conservative_cache?: ParseDiagnosticsResult;
   #recovery_cache?: ParseResult;
+  #findings_cache?: ParseFindings;
 
   constructor(source: TextSource) {
     this.source = source;
@@ -179,14 +206,12 @@ class BasicSession implements Session {
   *outline(options: SessionStreamOptions = {}): Generator<WikitextEvent> {
     yield* this.getOutlineCacheWithOptions({
       diagnostics: options.diagnostics === true,
-      recovery: 'default',
     });
   }
 
   *events(options: SessionStreamOptions = {}): Generator<WikitextEvent> {
     yield* this.getEventsCache({
       diagnostics: options.diagnostics === true,
-      recovery: 'default',
     });
   }
 
@@ -211,7 +236,6 @@ class BasicSession implements Session {
       } else {
         this.#tree_cache = buildTree(this.getEventsCache({
           diagnostics: false,
-          recovery: 'default',
         }), { source: this.source });
       }
     }
@@ -239,7 +263,6 @@ class BasicSession implements Session {
 
       const result = buildTreeWithDiagnostics(this.getEventsCache({
         diagnostics: true,
-        recovery: 'default',
       }), {
         source: this.source,
       });
@@ -260,15 +283,14 @@ class BasicSession implements Session {
   /**
   * Materialize the cached conservative tree-plus-diagnostics result.
   *
-  * This is the only tree lane that needs the conservative event cache. The
-  * default diagnostics lane and the recovery-summary lane can share the same
-  * diagnostics-enabled default event stream.
+  * This lane uses the same diagnostics-enabled event findings as
+  * {@linkcode parseWithDiagnostics}. Only the final tree materialization is
+  * more conservative.
    */
   parseStrictWithDiagnostics(): ParseDiagnosticsResult {
     if (this.#conservative_cache === undefined) {
       this.#conservative_cache = buildTreeStrict(this.getEventsCache({
         diagnostics: true,
-        recovery: 'conservative',
       }), {
         source: this.source,
       });
@@ -300,7 +322,6 @@ class BasicSession implements Session {
 
       const result = buildTreeWithRecovery(this.getEventsCache({
         diagnostics: true,
-        recovery: 'default',
       }), {
         source: this.source,
       });
@@ -318,6 +339,61 @@ class BasicSession implements Session {
     }
 
     return this.#recovery_cache;
+  }
+
+  /**
+   * Return the cached findings-first result.
+   *
+   * The findings are built from the cached diagnostics-enabled event lane and
+   * the cached diagnostics tree, so repeated calls do not reparse the source
+   * or recompute diagnostics. When `options.recovery` is `false`, the recovery
+   * list is stripped from the returned findings on each call.
+   */
+  analyze(options: AnalyzeOptions = {}): ParseFindings {
+    if (this.#findings_cache === undefined) {
+      const diagnostics_result = this.parseWithDiagnostics();
+      const events = this.getEventsCache({ diagnostics: true });
+      this.#findings_cache = {
+        source: this.source,
+        events,
+        diagnostics: diagnostics_result.diagnostics,
+        recovery: recoveriesFromDiagnostics(diagnostics_result.diagnostics),
+      };
+    }
+
+    if (options.recovery === false) {
+      return {
+        source: this.#findings_cache.source,
+        events: this.#findings_cache.events,
+        diagnostics: this.#findings_cache.diagnostics,
+      };
+    }
+
+    return this.#findings_cache;
+  }
+
+  /**
+   * Materialize a tree from the session's cached findings.
+   *
+   * Each policy has its own cache lane. Calling this repeatedly with the same
+   * policy is therefore a cache lookup, not a fresh tree build. Switching
+   * policies only pays for the extra materialization, not for tokenize or
+   * event-stream work.
+   */
+  materialize(options: MaterializeOptions = {}): ParseOutput {
+    if (options.policy === 'source-strict') {
+      const conservative = this.parseStrictWithDiagnostics();
+      return {
+        tree: conservative.tree,
+        diagnostics: conservative.diagnostics,
+      };
+    }
+
+    const diagnostics_result = this.parseWithDiagnostics();
+    return {
+      tree: diagnostics_result.tree,
+      diagnostics: diagnostics_result.diagnostics,
+    };
   }
 
   /**
@@ -366,21 +442,10 @@ class BasicSession implements Session {
   * The same reuse rule as `getOutlineCacheWithOptions()` applies here. The
   * session preserves the cheap diagnostics-off lane when possible, but it does
   * not avoid reusing a more expensive cache once that cache already exists.
+  * Materialization policy is intentionally not part of this cache.
    */
   private getEventsCache(options: SessionEventOptions): WikitextEvent[] {
     if (options.diagnostics) {
-      if (options.recovery === 'conservative') {
-        if (this.#conservative_event_cache === undefined) {
-          this.#conservative_event_cache = Array.from(eventsFromOutline(
-            this.source,
-            this.getOutlineCacheWithOptions(options),
-            options,
-          ));
-        }
-
-        return this.#conservative_event_cache;
-      }
-
       if (this.#diagnostic_event_cache === undefined) {
         this.#diagnostic_event_cache = Array.from(eventsFromOutline(
           this.source,
@@ -419,31 +484,4 @@ class BasicSession implements Session {
  */
 export function createSession(source: TextSource): Session {
   return new BasicSession(source);
-}
-
-/**
- * Rebuild the full event stream from an already computed outline stream.
- *
- * Keeping this helper separate makes the cache layering explicit in
- * `BasicSession`: block parsing and inline parsing are distinct costs, and the
- * session deliberately tries not to repay the block cost once it has the
- * outline cache.
- *
- * That matters most for repeated editor-like queries such as:
- *
- * ```text
- * outline() -> events() -> parse()
- * ```
- *
- * where only the first step should need to pay the block-parser cost.
- */
-function eventsFromOutline(
-  source: TextSource,
-  outline: Iterable<WikitextEvent>,
-  options: SessionEventOptions,
-): Generator<WikitextEvent> {
-  return inlineEvents(source, outline, {
-    diagnostics: options.diagnostics,
-    recovery: options.recovery,
-  });
 }
