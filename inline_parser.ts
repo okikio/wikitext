@@ -170,7 +170,11 @@ const INLINE_SPECIAL_START = Uint8Array.from({ length: 128 }, (_, code) =>
  * With that information, the parser can answer questions like "what point is
  * offset 9?" without storing a full point object for offsets 0 through 14.
  */
-interface TextGroupContext {
+/**
+ * @internal
+ * Shared scan context for one merged inline text group.
+ */
+export interface TextGroupContext {
   /** The original source text backing this inline scan. */
   source: TextSource;
   /** Inclusive start offset of the merged text group. */
@@ -183,28 +187,18 @@ interface TextGroupContext {
   line_starts: number[];
   /** Whether inline recovery should emit diagnostic events. */
   diagnostics: boolean;
-  /**
-  * Whether recoverable inline constructs keep the default overlay or collapse
-  * back to text.
-   *
-   * `default` keeps recovered wrapper structure when an opener was real but a
-   * closer never arrived. `conservative` keeps the diagnostic but collapses
-   * the same region back to plain text.
-   */
-  recovery: 'default' | 'conservative';
 }
 
 /**
  * Internal switches for one inline-enrichment lane.
  *
- * These mirror the public parse lanes so the inline parser does not do extra
- * diagnostic work when the caller only wanted the cheap default tree.
+ * This mirrors the public diagnostics choice so the inline parser does not do
+ * extra diagnostic work when the caller only wanted the cheap default tree.
+ * Materialization policy is intentionally not part of the event layer.
  */
 export interface InlineEventOptions {
   /** Whether inline-stage diagnostics are emitted into the event stream. */
   readonly diagnostics?: boolean;
-  /** Whether malformed inline regions keep the default tree overlay or collapse back to text. */
-  readonly recovery?: 'default' | 'conservative';
 }
 
 /**
@@ -212,8 +206,10 @@ export interface InlineEventOptions {
  *
  * `end_offset` tells the caller where scanning should resume. `events` contains
  * the full enter/exit/text sequence for the construct that matched.
+ *
+ * @internal
  */
-interface SpecialMatch {
+export interface SpecialMatch {
   /** Inclusive start offset of the recognized construct. */
   start_offset?: number;
   /** Exclusive end offset of the recognized construct. */
@@ -223,13 +219,15 @@ interface SpecialMatch {
 }
 
 /**
- * Parsed shape of an opening HTML-like tag.
+ * Parsed shape of one opening HTML-like tag.
  *
  * This is used for generic tags plus special cases such as `nowiki`, `ref`,
  * and `br`. We keep both the original tag name and a lowercase copy so later
  * matching can stay case-insensitive without reslicing repeatedly.
+ *
+ * @internal
  */
-interface TagOpen {
+export interface TagOpen {
   /** Discriminant for successful opener recognition. */
   kind: 'parsed';
   /** Tag name exactly as it appeared in source. */
@@ -251,8 +249,10 @@ interface TagOpen {
  * "the source only looked like it might start one". The inline parser uses
  * this shape to preserve the original bytes as text while still reporting a
  * recovery diagnostic.
+ *
+ * @internal
  */
-interface UnterminatedTagOpen {
+export interface UnterminatedTagOpen {
   /** Discriminant for opener recovery before any tag node is committed. */
   kind: 'unterminated';
   /** Tag name exactly as it appeared before EOF or range end. */
@@ -261,8 +261,12 @@ interface UnterminatedTagOpen {
   tag_name_lower: string;
 }
 
-/** Parsed shape of a closing HTML-like tag such as `</span>`. */
-interface TagClose {
+/**
+ * Parsed shape of a closing HTML-like tag such as `</span>`.
+ *
+ * @internal
+ */
+export interface TagClose {
   /** Lowercased tag name used for close/open matching. */
   tag_name_lower: string;
   /** Exclusive end offset of the parsed closing tag. */
@@ -271,8 +275,10 @@ interface TagClose {
 
 /**
  * Range of the matching close tag for a non-self-closing HTML-like node.
+ *
+ * @internal
  */
-interface TagBoundary {
+export interface TagBoundary {
   /** Inclusive start offset of the closing tag. */
   start_offset: number;
   /** Exclusive end offset of the closing tag. */
@@ -390,7 +396,6 @@ function* parseTextGroup(
     first.position.start,
   );
   ctx.diagnostics = options.diagnostics === true;
-  ctx.recovery = options.recovery ?? 'default';
 
   yield* parseInlineRange(ctx, ctx.start_offset, ctx.end_offset, true);
 }
@@ -1031,16 +1036,14 @@ function matchTagLike(
     if (close === null) {
       return {
         end_offset,
-        events: ctx.recovery === 'conservative'
-          ? preserveMissingCloseTagAsText(ctx, cursor, end_offset, tag.tag_name)
-          : wrapRecoveredLeaf(
-            ctx,
-            cursor,
-            end_offset,
-            'nowiki',
-            { value: ctx.source.slice(tag.end_offset, end_offset) },
-            tag.tag_name,
-          ),
+        events: wrapRecoveredLeaf(
+          ctx,
+          cursor,
+          end_offset,
+          'nowiki',
+          { value: ctx.source.slice(tag.end_offset, end_offset) },
+          tag.tag_name,
+        ),
       };
     }
     return {
@@ -1064,19 +1067,17 @@ function matchTagLike(
     if (close === null) {
       return {
         end_offset,
-        events: ctx.recovery === 'conservative'
-          ? preserveMissingCloseTagAsText(ctx, cursor, end_offset, tag.tag_name)
-          : createRecoveredWrappedInlineEvents(
-            ctx,
-            cursor,
-            end_offset,
-            'reference',
-            ref_props,
-            tag.end_offset,
-            end_offset,
-            true,
-            tag.tag_name,
-          ),
+        events: createRecoveredWrappedInlineEvents(
+          ctx,
+          cursor,
+          end_offset,
+          'reference',
+          ref_props,
+          tag.end_offset,
+          end_offset,
+          true,
+          tag.tag_name,
+        ),
       };
     }
     return {
@@ -1109,19 +1110,17 @@ function matchTagLike(
   if (close === null) {
     return {
       end_offset,
-      events: ctx.recovery === 'conservative'
-        ? preserveMissingCloseTagAsText(ctx, cursor, end_offset, tag.tag_name)
-        : createRecoveredWrappedInlineEvents(
-          ctx,
-          cursor,
-          end_offset,
-          'html-tag',
-          html_props,
-          tag.end_offset,
-          end_offset,
-          true,
-          tag.tag_name,
-        ),
+      events: createRecoveredWrappedInlineEvents(
+        ctx,
+        cursor,
+        end_offset,
+        'html-tag',
+        html_props,
+        tag.end_offset,
+        end_offset,
+        true,
+        tag.tag_name,
+      ),
     };
   }
   return {
@@ -1201,7 +1200,6 @@ function buildTextGroupContext(
     start_point,
     line_starts,
     diagnostics: true,
-    recovery: 'default',
   };
 }
 
@@ -1288,12 +1286,16 @@ function createWrappedInlineEvents(
 }
 
 /**
- * Create a wrapped inline node that recovers to the end of the current text range.
+ * Create a recovered wrapped inline node without choosing a final tree policy.
  *
  * The opener already reached `>`, so the node is structurally real even though
  * the matching close tag never arrived before the enclosing text group ended.
+ * Later materialization policy may still collapse that structure back to text,
+ * but the event stream itself keeps the committed finding intact.
+ *
+ * @internal
  */
-function createRecoveredWrappedInlineEvents(
+export function createRecoveredWrappedInlineEvents(
   ctx: TextGroupContext,
   start_offset: number,
   end_offset: number,
@@ -1321,9 +1323,14 @@ function createRecoveredWrappedInlineEvents(
 }
 
 /**
- * Wrap a leaf node that had a complete opener but no matching close tag.
+ * Wrap a recovered leaf node without choosing a final tree policy.
+ *
+ * This stays policy-neutral at the event level. Conservative callers collapse
+ * it later during tree materialization instead of losing the finding here.
+ *
+ * @internal
  */
-function wrapRecoveredLeaf(
+export function wrapRecoveredLeaf(
   ctx: TextGroupContext,
   start_offset: number,
   end_offset: number,
@@ -1342,8 +1349,10 @@ function wrapRecoveredLeaf(
 
 /**
  * Preserve an unterminated opener as plain text while still reporting recovery.
+ *
+ * @internal
  */
-function preserveUnterminatedTagOpenerAsText(
+export function preserveUnterminatedTagOpenerAsText(
   ctx: TextGroupContext,
   start_offset: number,
   end_offset: number,
@@ -1352,20 +1361,6 @@ function preserveUnterminatedTagOpenerAsText(
   const events: WikitextEvent[] = [];
   if (ctx.diagnostics) {
     events.push(unterminatedTagOpenerError(ctx, end_offset, tag_name));
-  }
-  events.push(emitText(ctx, start_offset, end_offset));
-  return events;
-}
-
-function preserveMissingCloseTagAsText(
-  ctx: TextGroupContext,
-  start_offset: number,
-  end_offset: number,
-  tag_name: string,
-): WikitextEvent[] {
-  const events: WikitextEvent[] = [];
-  if (ctx.diagnostics) {
-    events.push(missingCloseTagError(ctx, end_offset, tag_name));
   }
   events.push(emitText(ctx, start_offset, end_offset));
   return events;
