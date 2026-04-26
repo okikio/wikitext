@@ -8,6 +8,8 @@ import {
   inlineEvents,
   outlineEvents,
   parse,
+  parseStrictWithDiagnostics,
+  parseWithDiagnostics,
   tokenize,
 } from '../mod.ts';
 import { UNICODE_TEXT_FIXTURES } from './unicode_fixtures.ts';
@@ -472,6 +474,16 @@ export function drainStatelessLayeredWorkflow(source: string): number {
   return outline_count + full_event_count + tree_child_count;
 }
 
+export function drainStatelessParseWithDiagnostics(source: string): number {
+  const result = parseWithDiagnostics(source);
+  return result.tree.children.length + result.diagnostics.length;
+}
+
+export function drainStatelessParseStrictWithDiagnostics(source: string): number {
+  const result = parseStrictWithDiagnostics(source);
+  return result.tree.children.length + result.diagnostics.length;
+}
+
 export function drainSessionLayeredWorkflowCold(source: string): number {
   const session = createSession(source);
   const outline_count = Array.from(session.outline()).length;
@@ -551,6 +563,18 @@ export function drainSessionParseWithDiagnosticsWarm(source: string): number {
   const session = createSession(source);
   session.parseWithDiagnostics();
   const result = session.parseWithDiagnostics();
+  return result.tree.children.length + result.diagnostics.length;
+}
+
+export function drainSessionParseStrictWithDiagnosticsCold(source: string): number {
+  const result = createSession(source).parseStrictWithDiagnostics();
+  return result.tree.children.length + result.diagnostics.length;
+}
+
+export function drainSessionParseStrictWithDiagnosticsWarm(source: string): number {
+  const session = createSession(source);
+  session.parseStrictWithDiagnostics();
+  const result = session.parseStrictWithDiagnostics();
   return result.tree.children.length + result.diagnostics.length;
 }
 
