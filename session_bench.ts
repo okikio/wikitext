@@ -16,6 +16,8 @@ import {
   drainSessionOutlineCold,
   drainSessionOutlineWarm,
   drainSessionParseCold,
+  drainSessionParseStrictWithDiagnosticsCold,
+  drainSessionParseStrictWithDiagnosticsWarm,
   drainSessionParseWithDiagnosticsCold,
   drainSessionParseWithDiagnosticsWarm,
   drainSessionParseWithRecoveryCold,
@@ -59,6 +61,14 @@ summary(() => {
 
   bench('session.parseWithDiagnostics() warm: pathological ~8 KB', () => {
     do_not_optimize(drainSessionParseWithDiagnosticsWarm(SAME_SIZE_PATHOLOGICAL_TEXT));
+  }).gc('inner');
+
+  bench('session.parseStrictWithDiagnostics() cold: pathological ~8 KB', () => {
+    do_not_optimize(drainSessionParseStrictWithDiagnosticsCold(SAME_SIZE_PATHOLOGICAL_TEXT));
+  }).gc('inner');
+
+  bench('session.parseStrictWithDiagnostics() warm: pathological ~8 KB', () => {
+    do_not_optimize(drainSessionParseStrictWithDiagnosticsWarm(SAME_SIZE_PATHOLOGICAL_TEXT));
   }).gc('inner');
 
   bench('session.parseWithRecovery() cold: pathological ~8 KB', () => {
@@ -121,6 +131,14 @@ summary(() => {
 
   bench('session.parseWithDiagnostics() warm: synthetic article (~35-45 KB)', () => {
     do_not_optimize(drainSessionParseWithDiagnosticsWarm(nextSyntheticArticle()));
+  }).gc('inner');
+
+  bench('session.parseStrictWithDiagnostics() cold: synthetic article (~35-45 KB)', () => {
+    do_not_optimize(drainSessionParseStrictWithDiagnosticsCold(nextSyntheticArticle()));
+  }).gc('inner');
+
+  bench('session.parseStrictWithDiagnostics() warm: synthetic article (~35-45 KB)', () => {
+    do_not_optimize(drainSessionParseStrictWithDiagnosticsWarm(nextSyntheticArticle()));
   }).gc('inner');
 
   bench('session.parseWithRecovery() cold: synthetic article (~35-45 KB)', () => {
