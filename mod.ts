@@ -21,18 +21,20 @@
  *   `parseWithDiagnostics()`, `parseStrictWithDiagnostics()`, and
  *   `parseWithRecovery()` for
  *   orchestration
- * - `buildTree()`, `buildTreeWithDiagnostics()`, `buildTreeStrict()`,
- *   `buildTreeWithLooseDiagnostics()`, and `buildTreeWithRecovery()` for AST
- *   materialization from an event stream plus source
- * - `TreeMaterializationPolicy`, `TreeBuildMode`, `DiagnosticCode`, and
- *   related result types for stable parser-owned vocabularies and
- *   tree/diagnostic result shapes
+ * - `analyze()` and `materialize()` for the findings-first lane that
+ *   separates parser facts from tree materialization policy
+ * - `buildTree()`, `buildTreeWithDiagnostics()`, `buildTreeStrict()`, and
+ *   `buildTreeWithRecovery()` for AST materialization from an event stream plus
+ *   source
+ * - `TreeMaterializationPolicy`, `DiagnosticCode`, and related result types
+ *   for stable parser-owned vocabularies and tree/diagnostic result shapes
  * - `visit()`, `filter()`, `resolveTreePath()`, `resolveDiagnosticAnchor()`,
  *   and `locateDiagnostic()` helpers for common tree and event queries
  * - `createSession()` for cached repeated access to one source input,
  *   including `session.parseWithDiagnostics()`,
- *   `session.parseStrictWithDiagnostics()`, and
- *   `session.parseWithRecovery()`
+ *   `session.parseStrictWithDiagnostics()`,
+ *   `session.parseWithRecovery()`, `session.analyze()`, and
+ *   `session.materialize()`
  *
  * As more features land, this entry point is where they will be re-exported.
  *

@@ -18,7 +18,6 @@ import {
   argument,
   buildTree,
   buildTreeStrict,
-  buildTreeWithLooseDiagnostics,
   buildTreeWithRecovery,
   collectEvents,
   createSession,
@@ -44,7 +43,6 @@ import {
   text,
   textEvent,
   TreeMaterializationPolicy,
-  TreeBuildMode,
   tokenEvent,
   tokens,
   visit,
@@ -133,14 +131,11 @@ describe('mod.ts exports', () => {
     expect(parseWithRecovery(source).recovered).toBe(false);
     expect(parseWithDiagnostics(source).tree.type).toBe('root');
     expect(parseStrictWithDiagnostics(source).tree.type).toBe('root');
-    expect(buildTreeWithLooseDiagnostics(events(source), { source }).diagnostics).toEqual([]);
     expect(buildTreeStrict(events(source, { diagnostics: true }), { source }).diagnostics).toEqual([]);
     expect(buildTreeWithRecovery(events(source), { source }).recovered).toBe(false);
     expect(buildTree(events(source), { source }).type).toBe('root');
     expect(TreeMaterializationPolicy.DEFAULT_HTML_LIKE).toBe('default-html-like');
     expect(TreeMaterializationPolicy.SOURCE_STRICT).toBe('source-strict');
-    expect(TreeBuildMode.STRICT).toBe('strict');
-    expect(TreeBuildMode.LOOSE).toBe('loose');
     expect(DiagnosticCode.UNCLOSED_TABLE).toBe('UNCLOSED_TABLE');
   });
 
