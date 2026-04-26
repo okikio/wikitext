@@ -10,6 +10,8 @@ import { bench, do_not_optimize, run, summary } from 'npm:mitata';
 import {
   cycleInputs,
   drainStatelessLayeredWorkflow,
+  drainStatelessParseStrictWithDiagnostics,
+  drainStatelessParseWithDiagnostics,
   SAME_SIZE_MIXED_TEXT,
   SAME_SIZE_PATHOLOGICAL_TEXT,
   SAME_SIZE_PLAIN_TEXT,
@@ -33,6 +35,14 @@ summary(() => {
     do_not_optimize(parse(SAME_SIZE_PATHOLOGICAL_TEXT).children.length);
   }).gc('inner');
 
+  bench('parseWithDiagnostics(): same-size pathological (~8 KB)', () => {
+    do_not_optimize(drainStatelessParseWithDiagnostics(SAME_SIZE_PATHOLOGICAL_TEXT));
+  }).gc('inner');
+
+  bench('parseStrictWithDiagnostics(): same-size pathological (~8 KB)', () => {
+    do_not_optimize(drainStatelessParseStrictWithDiagnostics(SAME_SIZE_PATHOLOGICAL_TEXT));
+  }).gc('inner');
+
   bench('consumer workflow: stateless outline -> events -> parse (mixed ~8 KB)', () => {
     do_not_optimize(drainStatelessLayeredWorkflow(SAME_SIZE_MIXED_TEXT));
   }).gc('inner');
@@ -51,6 +61,14 @@ summary(() => {
 summary(() => {
   bench('parse(): synthetic article (~35-45 KB)', () => {
     do_not_optimize(parse(nextSyntheticArticle()).children.length);
+  }).gc('inner');
+
+  bench('parseWithDiagnostics(): synthetic article (~35-45 KB)', () => {
+    do_not_optimize(drainStatelessParseWithDiagnostics(nextSyntheticArticle()));
+  }).gc('inner');
+
+  bench('parseStrictWithDiagnostics(): synthetic article (~35-45 KB)', () => {
+    do_not_optimize(drainStatelessParseStrictWithDiagnostics(nextSyntheticArticle()));
   }).gc('inner');
 
   bench('consumer workflow: stateless outline -> events -> parse synthetic article (~35-45 KB)', () => {
