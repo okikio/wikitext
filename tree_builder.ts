@@ -142,47 +142,9 @@ export const TreeMaterializationPolicy: TreeMaterializationPolicyMap = Object.fr
   TREE_MATERIALIZATION_POLICY_VALUES,
 );
 
-/** Public map shape for the backward-compatible tree build-mode names. */
-export type TreeBuildModeMap = Readonly<{
-  LOOSE: 'loose';
-  STRICT: 'strict';
-}>;
-
-const TREE_BUILD_MODE_VALUES: TreeBuildModeMap = {
-  LOOSE: 'loose',
-  STRICT: 'strict',
-} as const;
-
-/**
- * Backward-compatible alias for the older recovery-shape terminology.
- *
- * Prefer {@linkcode TreeMaterializationPolicy} in new code. The old names are
- * still exported because the internal implementation still uses the compact
- * `loose` and `strict` mode strings.
- */
-export const TreeBuildMode: TreeBuildModeMap = Object.freeze(TREE_BUILD_MODE_VALUES);
-
 /** Public names for the tree materialization policies exposed by this module. */
 export type TreeMaterializationPolicy =
   typeof TreeMaterializationPolicy[keyof typeof TreeMaterializationPolicy];
-
-/**
- * Recovery-shape policy for the final tree.
- *
- * `strict` and `loose` do not describe whether the parse succeeded. Both modes
- * still recover and still produce a valid tree.
- *
- * They describe one narrower choice: when recovery had to invent wrapper
- * structure, how much of that inferred structure should survive in the final
- * tree?
- *
- * - `loose` keeps more recovered wrapper nodes when the parser can still infer
- *   a usable structure from the source
- * - `strict` keeps the diagnostic, but collapses recovery-heavy wrappers back
- *   to plain source-backed text when the source did not clearly commit to that
- *   structure
- */
-export type TreeBuildMode = typeof TreeBuildMode[keyof typeof TreeBuildMode];
 
 const PARENT_NODE_TYPE_LOOKUP: Partial<Record<WikistNodeType, true>> = Object.assign(
   Object.create(null),
@@ -352,7 +314,7 @@ export function buildTree(
   events: Iterable<WikitextEvent>,
   options: BuildTreeOptions,
 ): WikistRoot {
-  return materializeTree(events, options, TreeBuildMode.LOOSE).tree;
+  return materializeTree(events, options, TreeMaterializationPolicy.DEFAULT_HTML_LIKE).tree;
 }
 
 /**
@@ -370,7 +332,7 @@ export function buildTreeWithDiagnostics(
   events: Iterable<WikitextEvent>,
   options: BuildTreeOptions,
 ): ParseDiagnosticsResult {
-  return materializeDiagnosticsTree(events, options, TreeBuildMode.LOOSE);
+  return materializeDiagnosticsTree(events, options, TreeMaterializationPolicy.DEFAULT_HTML_LIKE);
 }
 
 /**
@@ -384,19 +346,7 @@ export function buildTreeStrict(
   events: Iterable<WikitextEvent>,
   options: BuildTreeOptions,
 ): ParseDiagnosticsResult {
-  return materializeDiagnosticsTree(events, options, TreeBuildMode.STRICT);
-}
-
-/**
- * Backward-compatible alias for the older loose-diagnostics helper.
- *
- * Prefer {@linkcode buildTreeWithDiagnostics} in new code.
- */
-export function buildTreeWithLooseDiagnostics(
-  events: Iterable<WikitextEvent>,
-  options: BuildTreeOptions,
-): ParseDiagnosticsResult {
-  return buildTreeWithDiagnostics(events, options);
+  return materializeDiagnosticsTree(events, options, TreeMaterializationPolicy.SOURCE_STRICT);
 }
 
 /**
@@ -410,7 +360,7 @@ export function buildTreeWithRecovery(
   events: Iterable<WikitextEvent>,
   options: BuildTreeOptions,
 ): ParseResult {
-  return materializeTree(events, options, TreeBuildMode.LOOSE, []);
+  return materializeTree(events, options, TreeMaterializationPolicy.DEFAULT_HTML_LIKE, []);
 }
 
 /**
@@ -444,7 +394,7 @@ function closeFrame(
   node_type: string,
   end: Point,
   source: TextSource,
-  build_mode: TreeBuildMode,
+  materialization_policy: TreeMaterializationPolicy,
   diagnostics?: ParseDiagnostic[],
 ): void {
   while (stack.length > 1) {
@@ -452,7 +402,7 @@ function closeFrame(
     if (top === undefined || top.kind === 'root') return;
 
     if (top.node_type !== node_type && diagnostics !== undefined) {
-      if (build_mode === TreeBuildMode.STRICT) {
+      if (materialization_policy === TreeMaterializationPolicy.SOURCE_STRICT) {
         top.recover_as_text = true;
       }
       diagnostics.push(mismatchedExitDiagnostic(stack, end, node_type, top.node_type));
@@ -591,15 +541,15 @@ function readStringProp(
  * Build the tree once and optionally capture diagnostics during the same walk.
  *
  * Keeping the shared traversal here ensures `buildTree()`,
- * `buildTreeWithDiagnostics()`, `buildTreeWithLooseDiagnostics()`, and
- * `buildTreeWithRecovery()` stay
- * structurally identical. The diagnostics path only pays extra work when a
+ * `buildTreeWithDiagnostics()`, `buildTreeStrict()`, and
+ * `buildTreeWithRecovery()` stay structurally identical apart from their final
+ * materialization policy. The diagnostics path only pays extra work when a
  * collector array is provided.
  */
 function materializeTree(
   events: Iterable<WikitextEvent>,
   options: BuildTreeOptions,
-  build_mode: TreeBuildMode,
+  materialization_policy: TreeMaterializationPolicy,
   diagnostics?: ParseDiagnostic[],
 ): ParseResult {
   const root: RootFrame = { kind: 'root', children: [] };
@@ -626,7 +576,7 @@ function materializeTree(
           event.node_type,
           event.position.end,
           options.source,
-          build_mode,
+          materialization_policy,
           diagnostics,
         );
         break;
@@ -641,8 +591,8 @@ function materializeTree(
 
       case 'error':
         if (diagnostics !== undefined) {
-          if (build_mode === TreeBuildMode.STRICT) {
-            markCurrentFrameForStrictText(stack, event.code);
+          if (materialization_policy === TreeMaterializationPolicy.SOURCE_STRICT) {
+            markCurrentFrameForSourceStrictText(stack, event.code);
           }
           diagnostics.push(parseDiagnosticFromEvent(event, stack));
         }
@@ -658,7 +608,7 @@ function materializeTree(
     if (top === undefined || top.kind === 'root') break;
 
     if (diagnostics !== undefined) {
-      if (build_mode === TreeBuildMode.STRICT) {
+      if (materialization_policy === TreeMaterializationPolicy.SOURCE_STRICT) {
         top.recover_as_text = true;
       }
       diagnostics.push(eofAutocloseDiagnostic(stack, top.default_end, top.node_type));
@@ -679,11 +629,11 @@ function materializeTree(
 function materializeDiagnosticsTree(
   events: Iterable<WikitextEvent>,
   options: BuildTreeOptions,
-  build_mode: TreeBuildMode,
+  materialization_policy: TreeMaterializationPolicy,
 ): ParseDiagnosticsResult {
-  const result = materializeTree(events, options, build_mode, []);
+  const result = materializeTree(events, options, materialization_policy, []);
 
-  if (build_mode !== TreeBuildMode.STRICT) {
+  if (materialization_policy !== TreeMaterializationPolicy.SOURCE_STRICT) {
     return {
       tree: result.tree,
       diagnostics: result.diagnostics,
@@ -819,7 +769,7 @@ function nearestStrippedAncestorPath(
   return nearest_path;
 }
 
-function markCurrentFrameForStrictText(
+function markCurrentFrameForSourceStrictText(
   stack: TreeFrame[],
   code?: KnownDiagnosticCode | string,
 ): void {
