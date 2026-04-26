@@ -20,7 +20,17 @@ import {
 import { UNICODE_TEXT_FIXTURES } from './_test_utils/unicode_fixtures.ts';
 import { DiagnosticCode } from './events.ts';
 import { createSession } from './session.ts';
-import { events, outlineEvents, parse, parseStrictWithDiagnostics, parseWithDiagnostics, parseWithRecovery } from './parse.ts';
+import {
+  analyze,
+  events,
+  materialize,
+  outlineEvents,
+  parse,
+  parseStrictWithDiagnostics,
+  parseWithDiagnostics,
+  parseWithRecovery,
+} from './parse.ts';
+import { TreeMaterializationPolicy } from './tree_builder.ts';
 import type { TextSource } from './text_source.ts';
 
 const SESSION_FIXTURES = [
@@ -455,5 +465,62 @@ describe('createSession()', () => {
     expect(strict_result.diagnostics[0]?.source).toBe(diagnostics_result.diagnostics[0]?.source);
     expect(strict_result.tree.children[0]?.type).toBe('text');
     expect(diagnostics_result.tree.children[0]?.type).toBe('table');
+  });
+});
+describe('Session.analyze() and Session.materialize()', () => {
+  it('analyze() matches the stateless analyze() API', () => {
+    for (const input of SESSION_FIXTURES) {
+      const session = createSession(input);
+      const session_findings = session.analyze();
+      const stateless_findings = analyze(input);
+
+      expect(session_findings.diagnostics).toEqual(stateless_findings.diagnostics);
+      expect(session_findings.recovery).toEqual(stateless_findings.recovery);
+      expect(session_findings.events.length).toBe(stateless_findings.events.length);
+    }
+  });
+
+  it('analyze() returns the same cached findings on repeated calls', () => {
+    const session = createSession('Paragraph with <ref name="cite-1">note');
+    const first = session.analyze();
+    const second = session.analyze();
+
+    expect(second).toBe(first);
+  });
+
+  it('analyze() strips recovery when options.recovery is false', () => {
+    const session = createSession('{|\n| Cell');
+    const findings = session.analyze({ recovery: false });
+
+    expect(findings.diagnostics.length).toBeGreaterThan(0);
+    expect(findings.recovery).toBeUndefined();
+  });
+
+  it('materialize() defaults to the default-html-like tree', () => {
+    const input = 'Paragraph with <ref name="cite-1">note';
+    const session = createSession(input);
+    const output = session.materialize();
+
+    expect(output).toEqual(materialize(analyze(input)));
+  });
+
+  it('materialize() honors the source-strict policy', () => {
+    const input = 'Paragraph with <ref name="cite-1">note';
+    const session = createSession(input);
+    const output = session.materialize({
+      policy: TreeMaterializationPolicy.SOURCE_STRICT,
+    });
+
+    expect(output).toEqual(
+      materialize(analyze(input), { policy: TreeMaterializationPolicy.SOURCE_STRICT }),
+    );
+  });
+
+  it('materialize() reuses cached trees across repeated calls', () => {
+    const session = createSession('Paragraph with <ref name="cite-1">note');
+    const first = session.materialize();
+    const second = session.materialize();
+
+    expect(second.tree).toBe(first.tree);
   });
 });
