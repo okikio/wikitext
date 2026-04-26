@@ -22,8 +22,6 @@ import {
   buildTree,
   buildTreeWithDiagnostics,
   buildTreeStrict,
-  buildTreeWithLooseDiagnostics,
-  buildTreeWithRecovery,
   type ParseDiagnosticsResult,
   type ParseResult,
 } from './tree_builder.ts';
@@ -36,7 +34,19 @@ import {
   type WikitextEvent,
 } from './events.ts';
 import { blockEvents } from './block_parser.ts';
-import { events, outlineEvents, parse, parseStrictWithDiagnostics, parseWithDiagnostics, parseWithRecovery, tokens } from './parse.ts';
+import {
+  analyze,
+  events,
+  materialize,
+  outlineEvents,
+  parse,
+  parseStrictWithDiagnostics,
+  parseWithDiagnostics,
+  parseWithRecovery,
+  tokens,
+  type ParseFindings,
+} from './parse.ts';
+import { TreeMaterializationPolicy } from './tree_builder.ts';
 import { tokenize } from './tokenizer.ts';
 
 const COMPLEX_PARSE_FIXTURES = [
@@ -523,20 +533,6 @@ describe('buildTree()', () => {
     });
   });
 
-  it('buildTreeWithLooseDiagnostics() stays as a compatibility alias for buildTreeWithDiagnostics()', () => {
-    const input = '{|\n| Cell';
-    const event_stream = events(input, { diagnostics: true });
-    const loose_result = buildTreeWithLooseDiagnostics(event_stream, { source: input });
-    const diagnostics_result = buildTreeWithDiagnostics(events(input, { diagnostics: true }), { source: input });
-    const recovery_result = buildTreeWithRecovery(events(input, { diagnostics: true }), { source: input });
-
-    expect(Object.hasOwn(loose_result, 'recovered')).toBe(false);
-    expect(loose_result.diagnostics).toEqual(recovery_result.diagnostics);
-    expect(loose_result.tree).toEqual(diagnostics_result.tree);
-    expect(loose_result.tree.children[0]?.type).toBe('table');
-    expect(diagnostics_result.tree.children[0]?.type).toBe('table');
-  });
-
   it('buildTreeStrict() keeps diagnostics while collapsing recovery-heavy wrappers', () => {
     const input = '{|\n| Cell';
     const strict_result = buildTreeStrict(events(input, { diagnostics: true }), { source: input });
@@ -897,9 +893,17 @@ describe('parseStrictWithDiagnostics()', () => {
     const result = parseStrictWithDiagnostics(input);
 
     expect(JSON.stringify(result.tree)).not.toContain('"type":"reference"');
-    expect(result.tree.children[0]?.type).toBe('text');
-    if (result.tree.children[0]?.type !== 'text') return;
-    expect(result.tree.children[0].value).toBe(input);
+    expect(result.tree.children[0]?.type).toBe('paragraph');
+    if (result.tree.children[0]?.type !== 'paragraph') return;
+    expect(result.tree.children[0].children).toHaveLength(2);
+    expect(result.tree.children[0].children[0]?.type).toBe('text');
+    if (result.tree.children[0].children[0]?.type !== 'text') return;
+    expect(result.tree.children[0].children[1]?.type).toBe('text');
+    if (result.tree.children[0].children[1]?.type !== 'text') return;
+    const text_values = result.tree.children[0].children.map((child) =>
+      child.type === 'text' ? child.value : ''
+    );
+    expect(text_values.join('')).toBe(input);
   });
 
   it('keeps unclosed tables as plain text instead of recovered table nodes', () => {
@@ -911,13 +915,13 @@ describe('parseStrictWithDiagnostics()', () => {
     expect(result.tree.children[0].value).toBe(input);
   });
 
-  it('may diverge from the structural overlay when a committed malformed region collapses to text', () => {
+  it('keeps block structure aligned when only an inline recovered region collapses to text', () => {
     const input = 'Paragraph with <ref name="cite-1">note';
     const outline_structure = blockStructureFromEvents(outlineEvents(input));
     const strict_result = parseStrictWithDiagnostics(input);
 
-    expect(blockStructureFromTree(strict_result.tree)).not.toEqual(outline_structure);
-    expect(strict_result.tree.children[0]?.type).toBe('text');
+    expect(blockStructureFromTree(strict_result.tree)).toEqual(outline_structure);
+    expect(strict_result.tree.children[0]?.type).toBe('paragraph');
   });
 
   it('matches the default tree when the source never reaches the commitment point', () => {
@@ -963,5 +967,95 @@ describe('parseWithRecovery()', () => {
 
     expect(JSON.stringify(result.tree)).toContain('"type":"reference"');
     expect(result.tree).toEqual(parseWithDiagnostics(input).tree);
+  });
+});
+describe('analyze()', () => {
+  it('returns replayable events, diagnostics, and a recovery list for malformed input', () => {
+    const input = 'Paragraph with <ref name="cite-1">note';
+    const findings: ParseFindings = analyze(input);
+
+    expect(findings.source).toBe(input);
+    expect(findings.events.length).toBeGreaterThan(0);
+    expect(findings.diagnostics.length).toBeGreaterThan(0);
+    expect(findings.recovery).toBeDefined();
+    expect(findings.recovery?.some((entry) => entry.kind === 'missing-close')).toBe(true);
+  });
+
+  it('produces the same diagnostics as parseWithDiagnostics()', () => {
+    for (const input of COMPLEX_PARSE_FIXTURES) {
+      const findings = analyze(input);
+      const diagnostics_result = parseWithDiagnostics(input);
+      expect(findings.diagnostics).toEqual(diagnostics_result.diagnostics);
+    }
+  });
+
+  it('omits the recovery list when options.recovery is false', () => {
+    const findings = analyze('{|\n| Cell', { recovery: false });
+
+    expect(findings.diagnostics.length).toBeGreaterThan(0);
+    expect(findings.recovery).toBeUndefined();
+  });
+
+  it('records unclosed-table recovery with both policies listed', () => {
+    const findings = analyze('{|\n| Cell');
+    const entry = findings.recovery?.find((item) => item.kind === 'unclosed-table');
+
+    expect(entry).toBeDefined();
+    expect(entry?.policies).toEqual([
+      TreeMaterializationPolicy.DEFAULT_HTML_LIKE,
+      TreeMaterializationPolicy.SOURCE_STRICT,
+    ]);
+  });
+
+  it('records unterminated-opener recovery with a single-policy list', () => {
+    const findings = analyze('Paragraph with <ref name="cite-1"');
+    const entry = findings.recovery?.find((item) => item.kind === 'unterminated-opener');
+
+    expect(entry).toBeDefined();
+    expect(entry?.policies).toEqual([TreeMaterializationPolicy.DEFAULT_HTML_LIKE]);
+  });
+});
+
+describe('materialize()', () => {
+  it('defaults to the default-html-like policy', () => {
+    const input = 'Paragraph with <ref name="cite-1">note';
+    const findings = analyze(input);
+    const output = materialize(findings);
+    const diagnostics_result = parseWithDiagnostics(input);
+
+    expect(output.tree).toEqual(diagnostics_result.tree);
+    expect(output.diagnostics).toEqual(diagnostics_result.diagnostics);
+  });
+
+  it('honors the source-strict policy', () => {
+    const input = 'Paragraph with <ref name="cite-1">note';
+    const findings = analyze(input);
+    const output = materialize(findings, {
+      policy: TreeMaterializationPolicy.SOURCE_STRICT,
+    });
+    const strict_result = parseStrictWithDiagnostics(input);
+
+    expect(output.tree).toEqual(strict_result.tree);
+    expect(output.diagnostics).toEqual(strict_result.diagnostics);
+  });
+
+  it('produces distinct trees for the two public policies when recovery is heavy', () => {
+    const findings = analyze('Paragraph with <ref name="cite-1">note');
+    const tolerant = materialize(findings);
+    const strict = materialize(findings, {
+      policy: TreeMaterializationPolicy.SOURCE_STRICT,
+    });
+
+    expect(JSON.stringify(tolerant.tree)).toContain('"type":"reference"');
+    expect(JSON.stringify(strict.tree)).not.toContain('"type":"reference"');
+  });
+
+  it('can be called more than once on the same findings without reparsing', () => {
+    const findings = analyze('Paragraph with <ref name="cite-1">note');
+    const first = materialize(findings);
+    const second = materialize(findings);
+
+    expect(first.tree).toEqual(second.tree);
+    expect(first.diagnostics).toEqual(second.diagnostics);
   });
 });
