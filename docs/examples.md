@@ -55,6 +55,25 @@ console.log(result.diagnostics.map((diagnostic) => diagnostic.code));
 This is the best current fit for the "recover on my behalf, but tell me what
 you did" style of usage.
 
+## Keep the same default tree but branch on recovery explicitly
+
+Use `parseWithRecovery()` when you want the same default tree and diagnostics
+as `parseWithDiagnostics()`, but you also want a cheap boolean for control
+flow.
+
+```ts
+import { parseWithRecovery } from '@okikio/wikitext';
+
+const result = parseWithRecovery('Paragraph with <ref name="x">note');
+
+if (result.recovered) {
+  console.log(result.diagnostics.map((diagnostic) => diagnostic.code));
+}
+```
+
+This is useful when your tool wants the parser's default tolerant tree but does
+not want to re-derive recovery status from `diagnostics.length > 0` each time.
+
 ## Ask for the conservative tree instead
 
 Use `parseStrictWithDiagnostics()` when diagnostics matter and you want the final tree to be
@@ -72,28 +91,84 @@ console.log(result.diagnostics.length > 0);
 This is useful for inspection or linting flows that do not want the final tree
 to keep as much repaired structure.
 
+## Analyze once, materialize many
+
+Use `analyze()` + `materialize()` when you want to inspect parser findings
+before deciding how (or whether) to build a tree, or when you want to build
+more than one tree from the same parse.
+
+```ts
+import { analyze, materialize, TreeMaterializationPolicy } from '@okikio/wikitext';
+
+const findings = analyze('Paragraph with <ref name="cite-1">note');
+
+// Inspect without materializing a tree.
+for (const entry of findings.recovery ?? []) {
+  console.log(entry.kind, entry.code, entry.policies);
+}
+
+// Build the default tree once.
+const tolerant = materialize(findings);
+
+// Build a conservative tree from the same findings without reparsing.
+const strict = materialize(findings, {
+  policy: TreeMaterializationPolicy.SOURCE_STRICT,
+});
+
+console.log(tolerant.tree.children[0]?.type); // 'paragraph'
+console.log(strict.tree.children[0]?.type);   // 'paragraph' with text-only children
+```
+
+The `findings.recovery` array lists the parser's structural decisions with a
+narrow taxonomy (`missing-close`, `unterminated-opener`, `unclosed-table`,
+`mismatched-exit`, `orphan-exit`, `eof-autoclose`). Each entry also lists the
+materialization policies that can change the final shape, so tooling can
+decide when policy choice is meaningful.
+
+## Skip the recovery list when you only want events
+
+Pass `{ recovery: false }` to `analyze()` to drop the recovery derivation when
+you only care about events and diagnostics.
+
+```ts
+import { analyze } from '@okikio/wikitext';
+
+const findings = analyze('{|\n| Cell', { recovery: false });
+
+console.log(findings.diagnostics.length > 0);
+console.log(findings.recovery); // undefined
+```
+
 ## Compare the current tree lanes on one malformed input
 
 The easiest way to understand the tree differences is to run the same input
 through more than one lane.
 
 ```ts
-import { parse, parseStrictWithDiagnostics, parseWithDiagnostics } from '@okikio/wikitext';
+import {
+  parse,
+  parseStrictWithDiagnostics,
+  parseWithDiagnostics,
+  parseWithRecovery,
+} from '@okikio/wikitext';
 
 const input = 'Paragraph with <ref name="x">note';
 
-const fast_tree = parse(input);
-const recovery_tree = parseWithDiagnostics(input);
+const default_tree = parse(input);
+const default_diagnostics = parseWithDiagnostics(input);
+const default_recovery = parseWithRecovery(input);
 const conservative_tree = parseStrictWithDiagnostics(input);
 
-console.log(fast_tree.children[0]?.type);
-console.log(recovery_tree.tree.children[0]?.type);
+console.log(default_tree.children[0]?.type);
+console.log(default_diagnostics.tree.children[0]?.type);
+console.log(default_recovery.recovered);
 console.log(conservative_tree.tree.children[0]?.type);
-console.log(recovery_tree.diagnostics.map((diagnostic) => diagnostic.code));
+console.log(default_diagnostics.diagnostics.map((diagnostic) => diagnostic.code));
 ```
 
 This kind of comparison is useful when you are deciding whether your tool wants
-speed first, tolerant structure first, or conservative diagnostics first.
+the cheapest default tree, the default tree with diagnostics, the same default
+tree with an explicit recovery summary, or the conservative source-strict tree.
 
 ## Resolve a diagnostic back to the tree
 

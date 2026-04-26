@@ -115,8 +115,8 @@ Each category should primarily test one public contract.
 | Token boundaries and source slicing | `tokens()` |
 | Block structure stability | `outlineEvents()`, `events()`, `parse()` |
 | Inline nesting and commitment | `events()` |
-| Diagnostics presence and codes | `events({ include_diagnostics: true })`, `parseWithDiagnostics()` |
-| Materialization policy differences | `parseWithDiagnostics()`, `parseStrict()`, `parseWithRecovery()` |
+| Diagnostics presence and codes | `events({ diagnostics: true })`, `parseWithDiagnostics()` |
+| Materialization policy differences | `parseWithDiagnostics()`, `parseStrictWithDiagnostics()`, `parseWithRecovery()` |
 | Session cache equivalence | `createSession()` APIs |
 | Never-throw invariant | property tests and reduced fuzz fixtures |
 

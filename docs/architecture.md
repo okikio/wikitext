@@ -10,9 +10,10 @@ readers do not have to parse one very large note to find one specific idea.
 
 ## Start here
 
-- [docs/architecture/choosing-a-tree.md](./architecture/choosing-a-tree.md)
-  Explains the real caller-facing choice between the cheap tree, the default
-  tolerant diagnostics lane, and the conservative diagnostics lane.
+- [docs/architecture/choosing-a-parser-result.md](./architecture/choosing-a-parser-result.md)
+  Explains the real caller-facing choice between the default tree family, the
+  conservative tree lane, the planned `analyze()` findings lane, and the
+  still-exploratory policy lane.
 - [docs/architecture/pipeline.md](./architecture/pipeline.md)
   Explains the tokenizer -> block parser -> inline parser -> consumer flow.
 - [docs/architecture/malformed-input.md](./architecture/malformed-input.md)
@@ -41,19 +42,25 @@ layer:
 - `events()` for the full event stream
 - `parse()` and related helpers for tree materialization
 
-The tree APIs are easiest to understand as two separate choices:
+The result APIs are easiest to understand as a sequence of choices:
 
 ```text
-1. do you want diagnostics preserved?
-2. if yes, which final tree policy do you want?
+1. do you want a tree immediately, or `analyze()` first?
+2. if you start with `analyze()`, do you later want a package-owned or caller-owned
+  materialization policy?
+3. if you want a tree immediately, do you want the default recovery-applying
+  tree family, or the conservative no-applied-recovery tree?
+4. if you want the default tree family, do you also want diagnostics preserved?
 ```
 
-That is why the current public lanes are:
+That is why the current tree-first lanes are:
 
 - `parse()`
 - `parseWithDiagnostics()`
-- `parseStrict()`
 - `parseWithRecovery()`
+- `parseStrictWithDiagnostics()`
+
+And the planned findings-first lane is `analyze()`.
 
 ## Why the split docs exist
 
@@ -369,7 +376,7 @@ This is the practical contract to carry into downstream code.
 3. `parse()` and `parseWithDiagnostics()` keep the default HTML-like
   materialization. They are the right tree lanes when a caller wants a stable
   structural overlay that still tolerates malformed committed constructs.
-4. `parseStrict()` is intentionally more conservative. It may collapse a
+4. `parseStrictWithDiagnostics()` is intentionally more conservative. It may collapse a
   malformed region back to source-backed text, including outer wrappers that
   only existed because tolerant recovery inferred them. It is not the lane to
   use as the canonical structural overlay.
@@ -405,7 +412,7 @@ session.events();        // full event stream
 session.outline();       // block-only events (cheap structural overlay)
 session.parse();         // full AST
 session.parseWithDiagnostics(); // default AST + diagnostics
-session.parseStrict();   // conservative AST + diagnostics
+session.parseStrictWithDiagnostics();   // conservative AST + diagnostics
 
 // Streaming
 session.write(chunk);          // append-only streaming input
@@ -420,7 +427,7 @@ Session is built *on top of* the pipeline, not replacing it. Each tier adds
 capability without retroactive redesign:
 
 - **Core**: `createSession(source)` with `.events()`, `.outline()`,
-  `.parse()`, `.parseWithDiagnostics()`, and `.parseStrict()`. Caches the last
+  `.parse()`, `.parseWithDiagnostics()`, and `.parseStrictWithDiagnostics()`. Caches the last
   parse result.
 - **Streaming**: `.write(chunk)` for append-only streaming,
   `.drainStableEvents()` for stable prefix consumption.

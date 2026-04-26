@@ -40,7 +40,10 @@ This page is for lookup, not for the full design explanation.
 |----------|-------------|
 | `parse(input)` | Parse wikitext into a `WikistRoot` AST using the cheapest default tree lane. |
 | `parseWithDiagnostics(input)` | Parse to `{ tree, diagnostics }` with the default tolerant materialization and preserved diagnostics. |
+| `parseWithRecovery(input)` | Parse to `{ tree, diagnostics, recovered }` with the same default tree as `parseWithDiagnostics()` plus an explicit recovery summary. |
 | `parseStrictWithDiagnostics(input)` | Parse to `{ tree, diagnostics }` with the conservative source-strict materialization. |
+| `analyze(input, options?)` | Analyze source into replayable findings `{ source, events, diagnostics, recovery? }` without materializing a tree. |
+| `materialize(findings, options?)` | Build a tree from previously analyzed findings under the requested `TreeMaterializationPolicy`. |
 | `stringify(tree)` | Serialize a wikist tree back to wikitext. Not yet implemented. |
 | `events(input)` | Full event stream (block + inline), with source-backed text ranges and optional diagnostics. |
 | `outlineEvents(input)` | Block-only event stream over the same source-backed structure. |

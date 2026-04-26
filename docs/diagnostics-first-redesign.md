@@ -116,42 +116,49 @@ default and `parseStrictWithDiagnostics()` names the conservative lane more hone
 still makes materialization feel like a parser-owned truth instead of a
 consumer policy layered over the same syntax findings.
 
-### The tree builder currently owns recovery-shape policy
+### The tree builder is mid-transition toward explicit materialization policy
 
-[tree_builder.ts](tree_builder.ts) currently exposes `TreeBuildMode` as
-`'strict' | 'loose'` and documents those modes as recovery-shape policies.
+[tree_builder.ts](tree_builder.ts) now exposes
+`TreeMaterializationPolicy.DEFAULT_HTML_LIKE` and
+`TreeMaterializationPolicy.SOURCE_STRICT` as the public materialization names.
+The older build-mode names are gone; the tree builder takes the
+materialization policy directly.
 
-That creates two problems:
+That is a real improvement, but one tension remains:
 
-- tree materialization policy is presented as if it were part of parsing truth
-- diagnostics and recovered tree shape are coupled in one API family
+- tree materialization policy is now named more honestly
+- the public API is still mostly tree-first instead of findings-first
 
-The addition of `buildTreeWithLooseDiagnostics()` helps operationally because
-it separates `recovered` from `diagnostics`, but it still keeps the public
-story centered on parser-owned recovery shape.
+So the problem has narrowed. The public story is no longer centered on strict
+versus loose parser truth, but the next design step is still to make findings a
+first-class surface rather than only something tree wrappers consume.
 
-### The current docs teach the drift as architecture
+### The docs are now closer, but the long-term direction still matters
 
-[docs/architecture.md](docs/architecture.md) and [readme.md](readme.md)
-currently describe `strict` and `loose` as top-level parser choices and teach
-the tree lanes as the main way to think about malformed input.
+[docs/architecture.md](docs/architecture.md), [readme.md](readme.md), and the
+parser-result notes now describe the default tree family, the conservative
+tree lane, and the planned findings-first direction more accurately.
 
-That is the opposite of the intended mental model. It teaches readers that the
-parser owns recovery semantics, when the intended design is that the parser
-owns diagnostics and continuation, and consumers own recovery responses.
+That fixes the biggest naming drift. What is still useful in this redesign note
+is the argument that even a well-named tree-first API is not the end state. The
+intended mental model is still that the parser owns diagnostics and
+continuation, while consumers ultimately own how recovery findings should be
+materialized or surfaced.
 
-### Tests currently lock in parser-owned recovery semantics
+### Tests now anchor the shared-findings model more directly
 
 [parse_test.ts](parse_test.ts) and [session_test.ts](session_test.ts) assert
 that:
 
-- `parseWithDiagnostics()` and `parseWithRecovery()` are separate wrappers even
-  though they now share the same default tree shape
-- strict versus loose tree shape is a parser-level distinction
-- recovery-specific wrapper nodes are part of the parser's promised result
+- `parseWithDiagnostics()` and `parseWithRecovery()` share the same default tree
+  and diagnostics
+- `parseStrictWithDiagnostics()` shares the same diagnostics as the default
+  diagnostics lane and only changes final materialization
+- inline recovered regions can collapse to text without erasing surrounding
+  block structure
 
-Those tests are useful because they show the exact behavioral drift. They will
-need to move as the API is realigned.
+Those assertions are closer to the intended architecture. They keep the result
+model honest while leaving room for a future findings-first public lane.
 
 ## Design Distinction To Restore
 
