@@ -14,16 +14,24 @@ surface, but the event stream remains the fundamental interchange format.
 The parser produces a faithful structural model of all documented wikitext
 constructs. It does not expand templates or render HTML: it is a source parser.
 
+One core design choice runs through the whole package: it is range-first.
+Tokens, events, diagnostics, and many text-like tree views stay anchored to
+UTF-16 source spans for as long as possible instead of eagerly copying strings
+at every stage.
+
 ## Features
 
 - **Event-stream-first architecture**: events are the fundamental output; AST,
   HTML compilation, and filtering are all consumers of the same event stream.
 - **Sync pull APIs available today**: `tokens()`, `outlineEvents()`,
-  `events()`, `parse()`, `parseWithDiagnostics()`, and `parseStrict()` expose
+  `events()`, `parse()`, `parseWithDiagnostics()`, and `parseStrictWithDiagnostics()` expose
   the current tokenizer, event, and tree layers without extra wrapper code.
 - **Never throws**: preserves malformed-input findings without crashing the
   parser.
 - **UTF-16 position semantics**: offsets match `string.charCodeAt(i)` and LSP.
+- **Range-first text handling**: text-like parser output stays source-backed for
+  as long as possible, which helps preserve exact source slices and avoid extra
+  allocation.
 - **unist-compatible**: works with `unist-util-visit` and the unified ecosystem.
 - **High performance**: `charCodeAt` scanning, offset-based tokens, single-pass
   with bounded lookahead, JIT-friendly hot loops.
@@ -51,7 +59,7 @@ The package already ships the foundational public surface:
 - event types, constructors, and type guards
 - wikist node interfaces, unions, builders, and type guards
 - `blockEvents()` and `inlineEvents()`
-- `tokens()`, `outlineEvents()`, `events()`, `parse()`, `parseWithDiagnostics()`, `parseStrict()`, and `parseWithRecovery()`
+- `tokens()`, `outlineEvents()`, `events()`, `parse()`, `parseWithDiagnostics()`, `parseStrictWithDiagnostics()`, `parseWithRecovery()`, `analyze()`, and `materialize()`
 - `buildTree()`, `buildTreeWithDiagnostics()`, `buildTreeStrict()`, `buildTreeWithRecovery()`, `filter()`, `visit()`, `resolveTreePath()`, `resolveDiagnosticAnchor()`, `locateDiagnostic()`, and `createSession()`
 
 The higher-level orchestration APIs shown in some examples below are still in
@@ -67,6 +75,14 @@ If you want the deeper design and architecture notes, start with
 If you want compact API tables, see [docs/api-reference.md](./docs/api-reference.md).
 
 If you want more task-focused usage snippets, see [docs/examples.md](./docs/examples.md).
+
+If you want a quick doc chooser:
+
+- start here for install, first use, and the high-level parser shape
+- go to [docs/examples.md](./docs/examples.md) for task-focused snippets
+- go to [docs/api-reference.md](./docs/api-reference.md) for symbol lookup
+- go to [docs/architecture/README.md](./docs/architecture/README.md) for the
+  design model and trade-offs
 
 ## Quick start
 
@@ -94,7 +110,7 @@ for (const evt of outlineEvents(largeArticle)) {
 
 > **Note:** `stringify()` and `parseChunked()` are still not implemented. The
 > sync orchestration layer is now available: `tokens()`, `outlineEvents()`,
-> `events()`, `parse()`, `parseWithDiagnostics()`, `parseStrict()`, `parseWithRecovery()`, `buildTree()`,
+> `events()`, `parse()`, `parseWithDiagnostics()`, `parseStrictWithDiagnostics()`, `parseWithRecovery()`, `buildTree()`,
 > `buildTreeWithDiagnostics()`, `buildTreeStrict()`, `buildTreeWithRecovery()`, `filter()`, `visit()`, `resolveTreePath()`,
 > `resolveDiagnosticAnchor()`, `locateDiagnostic()`, and the basic
 > `createSession()` wrapper all ship on top of the existing tokenizer, block
@@ -130,6 +146,9 @@ for (const evt of blockEvents(source, tokenize(source))) {
 for (const evt of inlineEvents(source, blockEvents(source, tokenize(source)))) {
   console.log(evt.kind, evt.node_type ?? '');
 }
+
+// Resolve a source-backed text range only when you need the actual string
+console.log(source.slice(0, 2)); // '=='
 
 // A plain string satisfies the TextSource interface
 const source: TextSource = '== Heading ==\nSome text.';
@@ -169,6 +188,10 @@ That is why the package exposes more than one level of output:
 - `events()` when you want the full structural stream
 - tree builders when you want a random-access result
 
+Those outputs are also range-first. The parser usually keeps text anchored to
+the original source span and UTF-16 offsets until a caller actually needs a
+materialized string.
+
 The package is also utility-first. It is meant to give you stable primitives to
 build on, not a giant hook surface that asks you to patch the parser from the
 inside.
@@ -190,7 +213,7 @@ and explain what it fixed. Some want a more diagnostics-first model where the
 parser surfaces problems without already deciding all the repairs for them.
 
 If you want the full plain-English version of that choice, see
-[docs/architecture/choosing-a-tree.md](./docs/architecture/choosing-a-tree.md).
+[docs/architecture/choosing-a-parser-result.md](./docs/architecture/choosing-a-parser-result.md).
 
 If you want the longer explanation for why the parser does not lead with deep
 hooks, see [docs/architecture/utility-first.md](./docs/architecture/utility-first.md).
@@ -213,7 +236,11 @@ lowest-cost consumers (search, grep). The event stream adds structure
 (enter/exit pairs). The tree builder, HTML compiler, and filter utilities are all
 event consumers.
 
-For the deeper architecture breakdown, see
+That model is what lets different API layers keep telling the same source-based
+story. Tokens, text events, diagnostics, and later tree nodes can still point
+back to the same original spans.
+
+For the deeper architecture breakdown and the doc map for that folder, see
 [docs/architecture/README.md](./docs/architecture/README.md).
 
 ## One concrete parser rule: HTML-like tag commitment
@@ -245,39 +272,44 @@ committed to.
 
 ## Choosing a result
 
-The parser is trying to support three high-level families of result.
+The parser currently exposes one shared findings pipeline and three practical
+tree-first wrappers on top of it.
 
 ```text
-fast tree
-  no diagnostics
-  no applied recovery policy
+default tree family
+  parse()
+  parseWithDiagnostics()
+  parseWithRecovery()
 
-recovery tree
-  diagnostics kept
-  recoveries applied on your behalf
+conservative tree
+  parseStrictWithDiagnostics()
 
-diagnostics-first tree
-  diagnostics kept
-  recoveries listed, not applied
+findings-first lane
+  analyze()
+  materialize(findings, { policy? })
 ```
 
-Today's public wrappers are still converging toward that model, but this is the
-rough current shape:
+Today's public wrappers map to that model like this:
 
-- `parse(input)` returns the default tree only
-- `parseWithDiagnostics(input)` returns `{ tree, diagnostics }` with the same
-  default tree shape as `parse(input)`
-- `parseStrict(input)` returns `{ tree, diagnostics }` with a conservative tree
-  that collapses recovery-heavy wrappers back to plain text when the source did
-  not clearly commit to them
-- `parseWithRecovery(input)` stays in the same recovery-tree family today
+- `parse(input)` returns the cheapest default tree
+- `parseWithDiagnostics(input)` returns `{ tree, diagnostics }` with that same
+  default tree plus preserved diagnostics
+- `parseWithRecovery(input)` returns the same default tree and diagnostics, plus
+  an explicit `recovered` summary boolean
+- `parseStrictWithDiagnostics(input)` returns `{ tree, diagnostics }` with the
+  same parser findings but a more conservative source-strict materialization
+- `analyze(input)` returns replayable findings (`events`, `diagnostics`, and a
+  structural `recovery` list) without materializing a tree
+- `materialize(findings, { policy? })` turns those findings into
+  `{ tree, diagnostics }` under one package-owned materialization policy, and
+  can be called more than once from the same findings
 
 The key decision is not just "do I want a tree?" It is "what kind of help do I
 want from the parser when the source gets messy?"
 
 If you want the fuller explanation, including what kind of magic each tree
 family should and should not perform, see
-[docs/architecture/choosing-a-tree.md](./docs/architecture/choosing-a-tree.md).
+[docs/architecture/choosing-a-parser-result.md](./docs/architecture/choosing-a-parser-result.md).
 
 Today's wrappers look like this in code:
 
@@ -287,7 +319,7 @@ const tree = parse(source);
 const diagnostics = parseWithDiagnostics(source);
 console.warn(diagnostics.diagnostics);
 
-const conservative = parseStrict(source);
+const conservative = parseStrictWithDiagnostics(source);
 console.warn(conservative.diagnostics);
 
 const result = parseWithRecovery(source);
@@ -297,12 +329,18 @@ if (result.recovered) {
 ```
 
 The same split exists on sessions through `session.parseWithDiagnostics()`,
-`session.parseStrict()`, and `session.parseWithRecovery()`.
+`session.parseStrictWithDiagnostics()`, and `session.parseWithRecovery()`.
+Sessions also expose `session.analyze()` and `session.materialize()` when you
+want findings-first access from a cached source.
 
 For event streams, diagnostics are opt-in. `events(input)` and
 `outlineEvents(input)` stay on the cheapest lane by default. Pass
-`{ include_diagnostics: true }` when you want parser findings preserved in the
+`{ diagnostics: true }` when you want parser findings preserved in the
 stream.
+
+In all of these lanes, UTF-16 offsets and original source spans stay
+authoritative. Derived text strings are convenient views, not the parser's main
+ground truth.
 
 ## Contributing
 
