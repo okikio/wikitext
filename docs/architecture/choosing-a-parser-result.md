@@ -20,8 +20,9 @@ exploratory policy layer, and those should stay clearly separated.
 4. A policy path, still exploratory, where the caller wants to make some of
    those later materialization decisions itself.
 
-The first three paths are the core story. The fourth path is worth exploring,
-but it should not be treated as equally settled yet.
+The first three paths are the core story, and all three are shipped today. The
+fourth path is worth exploring, but it should not be treated as equally
+settled yet.
 
 ## The simple version
 
@@ -146,21 +147,35 @@ do not apply the recovery for me yet
 I may want more than one materialization from the same parse
 ```
 
-What this path should give:
+What this path gives you today:
 
 - diagnostics preserved in the result
 - replayable parser findings, not just a one-shot event generator
 - recovery data listed explicitly
 - no recovery applied on the caller's behalf
-- enough information for the caller to choose which repairs to keep,
-  discard, or replace later
+- enough information to choose which repairs to keep, discard, or replace
+  later at materialization time
 
-The event stream is still the right primitive underneath this path, but a bare
-generator is probably too weak as the public shape. A control-heavy caller may
-need to inspect diagnostics, compare recoveries, and materialize more than one
-final tree without reparsing the same source every time.
+Current API:
 
-One concrete target shape could look like this.
+```ts
+import { analyze, materialize, TreeMaterializationPolicy } from '@okikio/wikitext';
+
+const findings = analyze(source);
+
+// inspect without materializing a tree
+for (const entry of findings.recovery ?? []) {
+  console.log(entry.kind, entry.code, entry.policies);
+}
+
+// materialize once or many times from the same findings
+const tolerant = materialize(findings);
+const strict = materialize(findings, {
+  policy: TreeMaterializationPolicy.SOURCE_STRICT,
+});
+```
+
+The shapes live in `parse.ts`:
 
 ```ts
 interface AnalyzeOptions {
@@ -171,8 +186,12 @@ interface ParseRecovery {
   readonly kind:
     | 'missing-close'
     | 'unterminated-opener'
-    | 'eof-autoclose'
-    | 'mismatched-exit';
+    | 'unclosed-table'
+    | 'mismatched-exit'
+    | 'orphan-exit'
+    | 'eof-autoclose';
+  readonly code: string;
+  readonly position: Position;
   readonly anchor: ParseDiagnosticAnchor;
   readonly node_type?: WikistNodeType;
   readonly policies: readonly TreeMaterializationPolicy[];
@@ -196,7 +215,7 @@ function materialize(
 ): ParseOutput;
 ```
 
-That shape keeps the ownership split clear:
+The ownership split is explicit:
 
 - `analyze()` owns parser facts
 - `materialize()` owns tree policy
@@ -356,27 +375,28 @@ structures.
 
 ## Where the current public API fits today
 
-The current wrappers do not map perfectly onto the intended path model yet, but
-this is the rough shape:
+The current wrappers now map fairly cleanly onto the path model:
 
-- `parse()`, `parseWithDiagnostics()`, and `parseWithRecovery()` are the current
+- `parse()`, `parseWithDiagnostics()`, and `parseWithRecovery()` are the
   default-tree family wrappers
-- `parseStrictWithDiagnostics()` is the current conservative tree wrapper
-- `analyze()` is the intended third path, but it is not the final public API yet
-- `events(source, { diagnostics: true })` and session caches are the closest
-  current low-level building blocks for a future `analyze()` lane
+- `parseStrictWithDiagnostics()` is the conservative tree wrapper
+- `analyze()` and `materialize()` are the findings-first lane
+- `createSession(source).analyze()` and `session.materialize()` are the same
+  lane backed by the session cache, so multiple materializations and repeated
+  findings lookups do not reparse the source
 
-So this page should be read as the intended decision model the docs are trying
-to clarify, not as a claim that every current wrapper already matches that
-model perfectly.
+The policy lane (Path 4) is still exploratory; `materialize()` currently
+accepts only the package-owned `DEFAULT_HTML_LIKE` and `SOURCE_STRICT`
+policies.
 
 ## Which one should most people use?
 
 - Use the default tree family when you want good defaults and a usable tree now.
 - Use the conservative tree when diagnostics matter but you do not want applied
   recovery to survive in the final tree.
-- Use the planned `analyze()` lane when you want to treat recovery as a later
-  caller decision instead of an already-applied parser policy.
+- Use `analyze()` + `materialize()` when you want to treat recovery as a later
+  caller decision instead of an already-applied parser policy, or when you
+  want more than one materialization from the same parse.
 - Treat the policy lane as an advanced follow-on design, not the default next
   step.
 

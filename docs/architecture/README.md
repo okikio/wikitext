@@ -3,7 +3,7 @@
 This folder breaks the larger architecture story into smaller documents with
 one job each.
 
-If you are new to the repo, start with the tree-choice note first. It explains
+If you are new to the repo, start with the parser-result note first. It explains
 the user-facing parser outputs before the deeper pipeline details.
 
 This folder is not the package introduction and it is not the symbol lookup
@@ -16,9 +16,10 @@ reference.
 
 ## Start here
 
-- [choosing-a-tree.md](./choosing-a-tree.md)
+- [choosing-a-parser-result.md](./choosing-a-parser-result.md)
   Explains the practical caller question: which parser result should I ask for,
-  why, and what trade-off each lane makes.
+  why, and what trade-off each lane makes, including the planned
+  `analyze()` findings-first lane and the still-exploratory policy lane.
 - [pipeline.md](./pipeline.md)
   Explains the tokenizer -> block parser -> inline parser -> consumer flow in
   plain English.
@@ -29,7 +30,7 @@ reference.
   Explains the diagnostics-first model without the full redesign note.
 - [api-direction.md](./api-direction.md)
   Explains the likely future public-surface cleanup without turning the main
-  tree-choice note into an API design memo.
+  parser-result note into an API design memo.
 - [diagnostic-anchors.md](./diagnostic-anchors.md)
   Explains how diagnostics point back into the final tree.
 - [parser-contracts.md](./parser-contracts.md)

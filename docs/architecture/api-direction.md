@@ -41,13 +41,17 @@ parseWithRecovery()
 
 parseStrictWithDiagnostics()
   -> conservative tree + diagnostics
+
+analyze()
+  -> findings (events + diagnostics + recovery list), no tree
+
+materialize(findings, { policy? })
+  -> tree + diagnostics under one materialization policy
 ```
 
-That surface is already more honest than the older docs, but it still mixes two
-different questions:
-
-1. do you want diagnostics?
-2. how should malformed regions be materialized?
+The tree-first wrappers still mix two questions (diagnostics and
+materialization), but `analyze()` + `materialize()` now separate them
+cleanly for callers who want that split.
 
 ## The direction the surface is moving toward
 
@@ -98,25 +102,21 @@ away from source-backed text interpretations.
 
 Convenience wrappers could still exist on top of that base surface.
 
-## Lane 3: concrete `analyze()` proposal
+## Lane 3: shipped `analyze()` + `materialize()` API
 
-There is one stronger diagnostics-first lane that the public API does not fully
-offer yet.
+The diagnostics-first lane is now public:
 
 ```text
 diagnostics and recovery data are exposed
-but final materialization is delayed or caller-owned
+final materialization is delayed or caller-owned via materialize()
 ```
 
-That would go beyond `parseStrictWithDiagnostics()`. `parseStrictWithDiagnostics()` still chooses a final tree
-policy for the caller. A true `analyze()` lane would expose parser findings
-first and let later tools decide which repairs to apply.
+That goes beyond `parseStrictWithDiagnostics()`, which still chooses a final
+tree policy for the caller. `analyze()` exposes parser findings first, and
+`materialize()` is the explicit step that turns those findings into one
+tree under a named policy.
 
-That kind of lane is especially compatible with a range-first design because it
-lets the parser preserve diagnostics and source spans now, then defer heavier
-materialization choices until a caller actually needs them.
-
-One practical shape could look more like this:
+The shipped shape looks like this:
 
 ```ts
 interface AnalyzeOptions {
@@ -127,8 +127,12 @@ interface ParseRecovery {
   readonly kind:
     | 'missing-close'
     | 'unterminated-opener'
-    | 'eof-autoclose'
-    | 'mismatched-exit';
+    | 'unclosed-table'
+    | 'mismatched-exit'
+    | 'orphan-exit'
+    | 'eof-autoclose';
+  readonly code: string;
+  readonly position: Position;
   readonly anchor: ParseDiagnosticAnchor;
   readonly node_type?: WikistNodeType;
   readonly policies: readonly TreeMaterializationPolicy[];
@@ -149,25 +153,11 @@ function materialize(
 ): ParseOutput;
 ```
 
-The important part is the ownership model:
+The ownership model is explicit:
 
 - the parser exposes replayable findings
 - the caller chooses whether to materialize them at all
 - if the caller does materialize them, the tree policy is explicit
-
-That is why a plain one-shot generator is probably not enough as the whole
-public lane. The event stream should stay the core primitive, but many callers
-will need to inspect diagnostics and materialize more than once without
-rerunning the parse.
-
-The main design bet is that findings should stay narrow and factual. A useful
-first public version should probably include:
-
-- replayable events
-- diagnostics
-- a small, parser-owned recovery vocabulary
-
-It should not start by exposing a broad plugin or callback system.
 
 ## Lane 4: exploratory policy proposal
 
@@ -211,10 +201,11 @@ Lane 3 is easier to keep stable because it mostly exposes what the parser
 already knows. Lane 4 is harder because it starts exposing when and how those
 findings are turned into structure.
 
-The likely order is:
+The likely remaining order is:
 
-1. make the `analyze()` lane real
-2. make the package-owned materializers explicit
+1. ~~make the `analyze()` lane real~~ (shipped)
+2. ~~make the package-owned materializers explicit~~ (shipped via
+   `TreeMaterializationPolicy`)
 3. only then decide whether a caller-owned policy lane belongs in public API
 
 That is the kind of thing I meant earlier by an "API proposal doc": a short
