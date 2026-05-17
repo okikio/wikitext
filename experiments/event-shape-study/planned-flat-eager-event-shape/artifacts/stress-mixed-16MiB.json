@@ -1,0 +1,114 @@
+{
+  "schema_version": 1,
+  "variant": "planned-flat-eager-event-shape",
+  "approach_dir": "planned-flat-eager-event-shape",
+  "generated_at": "2026-05-17T06:40:38.760Z",
+  "scenario": "mixed-article",
+  "size_bytes": 16777216,
+  "size_mib": 16,
+  "repeats": 1,
+  "environment": {
+    "deno_version": "deno 2.7.14 / v8 14.7.173.20-rusty / typescript 5.9.2",
+    "platform": "aarch64-linux"
+  },
+  "cases": [
+    {
+      "name": "events() streamed count",
+      "samples": [
+        {
+          "index": 0,
+          "elapsed_ms": 1863.9012510000002,
+          "heap_delta_bytes": 624616,
+          "checksum": 4850290
+        }
+      ],
+      "elapsed_ms": {
+        "samples": [
+          1863.9012510000002
+        ],
+        "mean": 1863.9012510000002,
+        "median": 1863.9012510000002,
+        "minimum": 1863.9012510000002,
+        "maximum": 1863.9012510000002,
+        "stdev": 0
+      },
+      "heap_delta_bytes": {
+        "samples": [
+          624616
+        ],
+        "mean": 624616,
+        "median": 624616,
+        "minimum": 624616,
+        "maximum": 624616,
+        "stdev": 0
+      }
+    },
+    {
+      "name": "parse() child count",
+      "samples": [
+        {
+          "index": 0,
+          "elapsed_ms": 2618.0557099999996,
+          "heap_delta_bytes": 179696,
+          "checksum": 477078
+        }
+      ],
+      "elapsed_ms": {
+        "samples": [
+          2618.0557099999996
+        ],
+        "mean": 2618.0557099999996,
+        "median": 2618.0557099999996,
+        "minimum": 2618.0557099999996,
+        "maximum": 2618.0557099999996,
+        "stdev": 0
+      },
+      "heap_delta_bytes": {
+        "samples": [
+          179696
+        ],
+        "mean": 179696,
+        "median": 179696,
+        "minimum": 179696,
+        "maximum": 179696,
+        "stdev": 0
+      }
+    },
+    {
+      "name": "parseWithDiagnostics() tree+diagnostics count",
+      "samples": [
+        {
+          "index": 0,
+          "elapsed_ms": 2523.7865010000005,
+          "heap_delta_bytes": 14384,
+          "checksum": 477079
+        }
+      ],
+      "elapsed_ms": {
+        "samples": [
+          2523.7865010000005
+        ],
+        "mean": 2523.7865010000005,
+        "median": 2523.7865010000005,
+        "minimum": 2523.7865010000005,
+        "maximum": 2523.7865010000005,
+        "stdev": 0
+      },
+      "heap_delta_bytes": {
+        "samples": [
+          14384
+        ],
+        "mean": 14384,
+        "median": 14384,
+        "minimum": 14384,
+        "maximum": 14384,
+        "stdev": 0
+      }
+    }
+  ],
+  "notes": [
+    "Large-input stress runs are intentionally separate from the main acceptance ledger.",
+    "String sizes are generated on demand so the study can run MiB-scale and GiB-scale scenarios without checking giant fixtures into the repo.",
+    "Scenario description: A repeated mix of headings, links, templates, tables, and refs."
+  ]
+}

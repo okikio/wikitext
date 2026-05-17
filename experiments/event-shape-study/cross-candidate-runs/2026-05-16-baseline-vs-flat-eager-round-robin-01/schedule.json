@@ -1,0 +1,37 @@
+{
+  "study": "event-shape",
+  "baseline": "current-baseline",
+  "approaches": [
+    "current-baseline",
+    "planned-flat-eager-event-shape"
+  ],
+  "rounds": 1,
+  "runs_per_report": 10,
+  "memory_repeats": 5,
+  "minimum_improvement": 0.05,
+  "maximum_regression": 0.03,
+  "bootstrap_iterations": 5000,
+  "alpha": 0.05,
+  "entries": [
+    {
+      "round": 1,
+      "order": 1,
+      "approach": "current-baseline",
+      "report_path": "experiments/event-shape-study/cross-candidate-runs/2026-05-16-baseline-vs-flat-eager-round-robin-01/reports/round-01--current-baseline.json"
+    },
+    {
+      "round": 1,
+      "order": 2,
+      "approach": "planned-flat-eager-event-shape",
+      "report_path": "experiments/event-shape-study/cross-candidate-runs/2026-05-16-baseline-vs-flat-eager-round-robin-01/reports/round-01--planned-flat-eager-event-shape.json",
+      "comparison_json": "experiments/event-shape-study/cross-candidate-runs/2026-05-16-baseline-vs-flat-eager-round-robin-01/comparisons/round-01--current-baseline--vs--planned-flat-eager-event-shape.json",
+      "comparison_text": "experiments/event-shape-study/cross-candidate-runs/2026-05-16-baseline-vs-flat-eager-round-robin-01/comparisons/round-01--current-baseline--vs--planned-flat-eager-event-shape.txt"
+    }
+  ],
+  "commands": [
+    "mise x deno@latest -- deno run --allow-run=mise,git --allow-read --allow-write experiments/event-shape-study/tools/collect_approach_report.ts --approach-dir=current-baseline --variant=current-baseline --runs=10 --memory-repeats=5 --out=experiments/event-shape-study/cross-candidate-runs/2026-05-16-baseline-vs-flat-eager-round-robin-01/reports/round-01--current-baseline.json",
+    "mise x deno@latest -- deno run --allow-run=mise,git --allow-read --allow-write experiments/event-shape-study/tools/collect_approach_report.ts --approach-dir=planned-flat-eager-event-shape --variant=planned-flat-eager-event-shape --runs=10 --memory-repeats=5 --out=experiments/event-shape-study/cross-candidate-runs/2026-05-16-baseline-vs-flat-eager-round-robin-01/reports/round-01--planned-flat-eager-event-shape.json",
+    "mise x deno@latest -- deno run --allow-read experiments/event-shape-study/tools/compare_reports.ts --min-improvement=0.05 --max-regression=0.03 --bootstrap=5000 --alpha=0.05 --format=json experiments/event-shape-study/cross-candidate-runs/2026-05-16-baseline-vs-flat-eager-round-robin-01/reports/round-01--current-baseline.json experiments/event-shape-study/cross-candidate-runs/2026-05-16-baseline-vs-flat-eager-round-robin-01/reports/round-01--planned-flat-eager-event-shape.json",
+    "mise x deno@latest -- deno run --allow-read experiments/event-shape-study/tools/compare_reports.ts --min-improvement=0.05 --max-regression=0.03 --bootstrap=5000 --alpha=0.05 --format=text experiments/event-shape-study/cross-candidate-runs/2026-05-16-baseline-vs-flat-eager-round-robin-01/reports/round-01--current-baseline.json experiments/event-shape-study/cross-candidate-runs/2026-05-16-baseline-vs-flat-eager-round-robin-01/reports/round-01--planned-flat-eager-event-shape.json"
+  ]
+}

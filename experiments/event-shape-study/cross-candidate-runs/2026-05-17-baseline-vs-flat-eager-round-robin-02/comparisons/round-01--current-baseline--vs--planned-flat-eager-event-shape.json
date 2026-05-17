@@ -1,0 +1,108 @@
+{
+  "baseline": {
+    "variant": "current-baseline",
+    "branch": "perf-test-improve-event-shapes",
+    "commit": "ffe74312ed03a2b25f510ffa5786bcd4c65ba4a3",
+    "path": "experiments/event-shape-study/cross-candidate-runs/2026-05-17-baseline-vs-flat-eager-round-robin-02/reports/round-01--current-baseline.json"
+  },
+  "minimum_improvement": 0.05,
+  "maximum_regression": 0.03,
+  "bootstrap_iterations": 5000,
+  "alpha": 0.05,
+  "decisions": [
+    {
+      "variant": "planned-flat-eager-event-shape",
+      "path": "experiments/event-shape-study/cross-candidate-runs/2026-05-17-baseline-vs-flat-eager-round-robin-02/reports/round-01--planned-flat-eager-event-shape.json",
+      "target_timing_median": 0.009482694612683957,
+      "memory_median": -0.039664641675517365,
+      "worst_critical_timing": -0.014634146341463415,
+      "significant_target_wins": 2,
+      "significant_memory_wins": 0,
+      "significant_critical_regressions": 0,
+      "recommended": false,
+      "top_timing_wins": [
+        {
+          "name": "events() no position access: same-size mixed (~8 KB)",
+          "family": "timing",
+          "estimate": 0.10992627591544135,
+          "ci_lower": 0.06236283411960502,
+          "ci_upper": 0.18510237514195527,
+          "p_value": 0,
+          "adjusted_p_value": 0,
+          "significant_better": true,
+          "significant_worse": false
+        },
+        {
+          "name": "events() no position access: same-size plain (~8 KB)",
+          "family": "timing",
+          "estimate": 0.0631524624004719,
+          "ci_lower": 0.024527230952624525,
+          "ci_upper": 0.10099660950494292,
+          "p_value": 0.0016,
+          "adjusted_p_value": 0.027200000000000002,
+          "significant_better": true,
+          "significant_worse": false
+        },
+        {
+          "name": "events() no position access: same-size pathological (~8 KB)",
+          "family": "timing",
+          "estimate": 0.015444015444015444,
+          "ci_lower": 0.005852516582130316,
+          "ci_upper": 0.0338145896656535,
+          "p_value": 0.004,
+          "adjusted_p_value": 0.064,
+          "significant_better": false,
+          "significant_worse": false
+        }
+      ],
+      "top_memory_wins": [
+        {
+          "name": "same-size mixed (~8 KB) :: parse() result retained",
+          "family": "memory",
+          "estimate": 0.0012080145517155195,
+          "ci_lower": -0.05187853144123788,
+          "ci_upper": 0.02131217523730725,
+          "p_value": 0.4908,
+          "adjusted_p_value": 1,
+          "significant_better": false,
+          "significant_worse": false
+        }
+      ],
+      "critical_regressions": [
+        {
+          "name": "session.parseWithDiagnostics() warm: same-size pathological (~8 KB)",
+          "family": "timing",
+          "estimate": -0.014634146341463415,
+          "ci_lower": -0.03654982833900835,
+          "ci_upper": 0.030256951927257587,
+          "p_value": 0.6372,
+          "adjusted_p_value": 1,
+          "significant_better": false,
+          "significant_worse": false
+        },
+        {
+          "name": "session.parseWithDiagnostics() cold: same-size pathological (~8 KB)",
+          "family": "timing",
+          "estimate": -0.013114754098360656,
+          "ci_lower": -0.0269825600526489,
+          "ci_upper": 0.03526924082712915,
+          "p_value": 0.8388,
+          "adjusted_p_value": 1,
+          "significant_better": false,
+          "significant_worse": false
+        },
+        {
+          "name": "session.parse() warm: synthetic article (~35-45 KB)",
+          "family": "timing",
+          "estimate": -0.012102874432677761,
+          "ci_lower": -0.10481686120095628,
+          "ci_upper": 0.010134128166915052,
+          "p_value": 0.1904,
+          "adjusted_p_value": 1,
+          "significant_better": false,
+          "significant_worse": false
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,18 @@
+baseline: current-baseline (perf-test-improve-event-shapes ffe74312)
+decision rule: target median >= +5.00%, critical regressions > -3.00% disallowed, Holm-adjusted alpha=0.050
+
+planned-flat-eager-event-shape: not recommended
+report: experiments/event-shape-study/cross-candidate-runs/2026-05-17-baseline-vs-flat-eager-round-robin-02/reports/round-01--planned-flat-eager-event-shape.json
+target timing median: +0.95% (2/9 significant wins)
+memory median: -3.97% (0 significant wins)
+worst critical timing: -1.46% (0 significant regressions)
+top timing wins:
+- events() no position access: same-size mixed (~8 KB): +10.99% [+6.24%, +18.51%], p_adj=0.00e+0
+- events() no position access: same-size plain (~8 KB): +6.32% [+2.45%, +10.10%], p_adj=2.72e-2
+- events() no position access: same-size pathological (~8 KB): +1.54% [+0.59%, +3.38%], p_adj=6.40e-2
+top memory wins:
+- same-size mixed (~8 KB) :: parse() result retained: +0.12% [-5.19%, +2.13%], p_adj=1.00e+0
+critical timing risks:
+- session.parseWithDiagnostics() warm: same-size pathological (~8 KB): -1.46% [-3.65%, +3.03%], p_adj=1.00e+0
+- session.parseWithDiagnostics() cold: same-size pathological (~8 KB): -1.31% [-2.70%, +3.53%], p_adj=1.00e+0
+- session.parse() warm: synthetic article (~35-45 KB): -1.21% [-10.48%, +1.01%], p_adj=1.00e+0

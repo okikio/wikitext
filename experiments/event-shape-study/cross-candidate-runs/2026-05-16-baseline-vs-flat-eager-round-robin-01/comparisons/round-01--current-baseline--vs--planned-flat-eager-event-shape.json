@@ -1,0 +1,62 @@
+{
+  "baseline": {
+    "variant": "current-baseline",
+    "branch": "perf-test-improve-event-shapes",
+    "commit": "ffe74312ed03a2b25f510ffa5786bcd4c65ba4a3",
+    "path": "experiments/event-shape-study/cross-candidate-runs/2026-05-16-baseline-vs-flat-eager-round-robin-01/reports/round-01--current-baseline.json"
+  },
+  "minimum_improvement": 0.05,
+  "maximum_regression": 0.03,
+  "bootstrap_iterations": 5000,
+  "alpha": 0.05,
+  "decisions": [
+    {
+      "variant": "planned-flat-eager-event-shape",
+      "path": "experiments/event-shape-study/cross-candidate-runs/2026-05-16-baseline-vs-flat-eager-round-robin-01/reports/round-01--planned-flat-eager-event-shape.json",
+      "target_timing_median": 0.04554079696394687,
+      "memory_median": -0.039664641675517365,
+      "worst_critical_timing": 0.017991004497751123,
+      "significant_target_wins": 4,
+      "significant_memory_wins": 0,
+      "significant_critical_regressions": 0,
+      "recommended": false,
+      "top_timing_wins": [
+        {
+          "name": "events() no position access: same-size mixed (~8 KB)",
+          "family": "timing",
+          "estimate": 0.13415803205988516,
+          "ci_lower": 0.02431625442339355,
+          "ci_upper": 0.16480936133001584,
+          "p_value": 0.014,
+          "adjusted_p_value": 0.0324,
+          "significant_better": true,
+          "significant_worse": false
+        },
+        {
+          "name": "events() offsets only: same-size mixed (~8 KB)",
+          "family": "timing",
+          "estimate": 0.09190830862679879,
+          "ci_lower": 0.05864477301456209,
+          "ci_upper": 0.14854148851853805,
+          "p_value": 0,
+          "adjusted_p_value": 0,
+          "significant_better": true,
+          "significant_worse": false
+        },
+        {
+          "name": "events() no position access: same-size plain (~8 KB)",
+          "family": "timing",
+          "estimate": 0.0802456409048068,
+          "ci_lower": 0.04420649315820314,
+          "ci_upper": 0.13271011992658752,
+          "p_value": 0,
+          "adjusted_p_value": 0,
+          "significant_better": true,
+          "significant_worse": false
+        }
+      ],
+      "top_memory_wins": [],
+      "critical_regressions": []
+    }
+  ]
+}

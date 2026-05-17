@@ -1,0 +1,1267 @@
+{
+  "schema_version": 1,
+  "variant": "current-baseline",
+  "branch": "perf-test-improve-event-shapes",
+  "commit": "ffe74312ed03a2b25f510ffa5786bcd4c65ba4a3",
+  "generated_at": "2026-05-17T07:22:06.887Z",
+  "runs": 10,
+  "memory_repeats": 5,
+  "timing_unit": "microseconds_per_iter",
+  "memory_unit": "bytes",
+  "environment": {
+    "uname": "Linux 6.12.76-linuxkit #1 SMP Thu Apr 30 11:19:05 UTC 2026 aarch64 GNU/Linux",
+    "deno_version": "deno 2.7.14 (stable, release, aarch64-unknown-linux-gnu)\nv8 14.7.173.20-rusty\ntypescript 5.9.2",
+    "lscpu_summary": {
+      "Architecture": "aarch64",
+      "CPU(s)": "8",
+      "Vendor ID": "Apple",
+      "Model name": "-",
+      "Thread(s) per core": "1",
+      "Socket(s)": "-"
+    },
+    "git_worktree_clean": false
+  },
+  "design": {
+    "timing_command": "mise x deno@latest -- deno bench --no-lock --allow-sys --allow-env=NODE_DISABLE_COLORS --v8-flags=--expose-gc event_shape_bench.ts",
+    "memory_command": "mise x deno@latest -- deno run --no-lock --allow-sys --v8-flags=--expose-gc event_shape_memory.ts --repeats=5 --format=json",
+    "approach_dir": "experiments/event-shape-study/current-baseline",
+    "code_dir": "experiments/event-shape-study/current-baseline/code",
+    "independent_process_per_run": true,
+    "raw_samples_preserved": true,
+    "bootstrap_ready": true,
+    "notes": [
+      "Each timing run executes the approach-local event_shape_bench.ts in a fresh process.",
+      "Each memory run executes the approach-local event_shape_memory.ts in a fresh process with explicit repeats.",
+      "All code under test lives inside the approach-local code snapshot to reduce cross-approach variation from root-directory edits."
+    ]
+  },
+  "timing": {
+    "per_run": [
+      {
+        "index": 0,
+        "benchmarks": {
+          "events() no position access: same-size plain (~8 KB)": 379.63,
+          "events() no position access: same-size mixed (~8 KB)": 612.09,
+          "events() no position access: same-size pathological (~8 KB)": 2590,
+          "events() offsets only: same-size mixed (~8 KB)": 502.46,
+          "events() offsets only: same-size pathological (~8 KB)": 2510,
+          "events() all position reads: same-size mixed (~8 KB)": 525.29,
+          "events() all position reads: same-size pathological (~8 KB)": 2820,
+          "events() enter props reads: same-size mixed (~8 KB)": 593.41,
+          "events() enter props reads: same-size pathological (~8 KB)": 2670,
+          "events() retained array only: same-size mixed (~8 KB)": 503.21,
+          "session.events() warm retained array: same-size mixed (~8 KB)": 979.19,
+          "events() retained array only: synthetic article (~35-45 KB)": 2180,
+          "session.events() warm retained array: synthetic article (~35-45 KB)": 2760,
+          "parse(): same-size mixed (~8 KB)": 960.21,
+          "parseWithDiagnostics(): same-size pathological (~8 KB)": 3050,
+          "session.events() cold: same-size mixed (~8 KB)": 656.2,
+          "session.events() warm: same-size mixed (~8 KB)": 778.61,
+          "session.parse() cold: same-size mixed (~8 KB)": 965.82,
+          "session.parse() warm: same-size mixed (~8 KB)": 948.96,
+          "session.parseWithDiagnostics() cold: same-size pathological (~8 KB)": 3080,
+          "session.parseWithDiagnostics() warm: same-size pathological (~8 KB)": 3120,
+          "parse(): synthetic article (~35-45 KB)": 3320,
+          "session.events() warm: synthetic article (~35-45 KB)": 2780,
+          "session.parse() warm: synthetic article (~35-45 KB)": 3270,
+          "session.parseWithDiagnostics() warm: synthetic article (~35-45 KB)": 3360
+        }
+      },
+      {
+        "index": 1,
+        "benchmarks": {
+          "events() no position access: same-size plain (~8 KB)": 320.15,
+          "events() no position access: same-size mixed (~8 KB)": 732.59,
+          "events() no position access: same-size pathological (~8 KB)": 2710,
+          "events() offsets only: same-size mixed (~8 KB)": 471.3,
+          "events() offsets only: same-size pathological (~8 KB)": 2510,
+          "events() all position reads: same-size mixed (~8 KB)": 454.34,
+          "events() all position reads: same-size pathological (~8 KB)": 2490,
+          "events() enter props reads: same-size mixed (~8 KB)": 446.72,
+          "events() enter props reads: same-size pathological (~8 KB)": 2480,
+          "events() retained array only: same-size mixed (~8 KB)": 456.78,
+          "session.events() warm retained array: same-size mixed (~8 KB)": 777.58,
+          "events() retained array only: synthetic article (~35-45 KB)": 1880,
+          "session.events() warm retained array: synthetic article (~35-45 KB)": 2650,
+          "parse(): same-size mixed (~8 KB)": 936.37,
+          "parseWithDiagnostics(): same-size pathological (~8 KB)": 3010,
+          "session.events() cold: same-size mixed (~8 KB)": 649.76,
+          "session.events() warm: same-size mixed (~8 KB)": 778.19,
+          "session.parse() cold: same-size mixed (~8 KB)": 939.36,
+          "session.parse() warm: same-size mixed (~8 KB)": 944.52,
+          "session.parseWithDiagnostics() cold: same-size pathological (~8 KB)": 3020,
+          "session.parseWithDiagnostics() warm: same-size pathological (~8 KB)": 3070,
+          "parse(): synthetic article (~35-45 KB)": 3360,
+          "session.events() warm: synthetic article (~35-45 KB)": 2750,
+          "session.parse() warm: synthetic article (~35-45 KB)": 3440,
+          "session.parseWithDiagnostics() warm: synthetic article (~35-45 KB)": 3320
+        }
+      },
+      {
+        "index": 2,
+        "benchmarks": {
+          "events() no position access: same-size plain (~8 KB)": 342.87,
+          "events() no position access: same-size mixed (~8 KB)": 767.85,
+          "events() no position access: same-size pathological (~8 KB)": 2640,
+          "events() offsets only: same-size mixed (~8 KB)": 473.89,
+          "events() offsets only: same-size pathological (~8 KB)": 2480,
+          "events() all position reads: same-size mixed (~8 KB)": 448.95,
+          "events() all position reads: same-size pathological (~8 KB)": 2480,
+          "events() enter props reads: same-size mixed (~8 KB)": 478.14,
+          "events() enter props reads: same-size pathological (~8 KB)": 2500,
+          "events() retained array only: same-size mixed (~8 KB)": 443.54,
+          "session.events() warm retained array: same-size mixed (~8 KB)": 757.13,
+          "events() retained array only: synthetic article (~35-45 KB)": 1890,
+          "session.events() warm retained array: synthetic article (~35-45 KB)": 2600,
+          "parse(): same-size mixed (~8 KB)": 899.49,
+          "parseWithDiagnostics(): same-size pathological (~8 KB)": 3070,
+          "session.events() cold: same-size mixed (~8 KB)": 653.17,
+          "session.events() warm: same-size mixed (~8 KB)": 794.82,
+          "session.parse() cold: same-size mixed (~8 KB)": 951.02,
+          "session.parse() warm: same-size mixed (~8 KB)": 923.36,
+          "session.parseWithDiagnostics() cold: same-size pathological (~8 KB)": 3100,
+          "session.parseWithDiagnostics() warm: same-size pathological (~8 KB)": 3130,
+          "parse(): synthetic article (~35-45 KB)": 3240,
+          "session.events() warm: synthetic article (~35-45 KB)": 3710,
+          "session.parse() warm: synthetic article (~35-45 KB)": 3470,
+          "session.parseWithDiagnostics() warm: synthetic article (~35-45 KB)": 3290
+        }
+      },
+      {
+        "index": 3,
+        "benchmarks": {
+          "events() no position access: same-size plain (~8 KB)": 335.33,
+          "events() no position access: same-size mixed (~8 KB)": 563.92,
+          "events() no position access: same-size pathological (~8 KB)": 2550,
+          "events() offsets only: same-size mixed (~8 KB)": 453.63,
+          "events() offsets only: same-size pathological (~8 KB)": 2630,
+          "events() all position reads: same-size mixed (~8 KB)": 477.22,
+          "events() all position reads: same-size pathological (~8 KB)": 2550,
+          "events() enter props reads: same-size mixed (~8 KB)": 473.54,
+          "events() enter props reads: same-size pathological (~8 KB)": 2470,
+          "events() retained array only: same-size mixed (~8 KB)": 479.57,
+          "session.events() warm retained array: same-size mixed (~8 KB)": 774.32,
+          "events() retained array only: synthetic article (~35-45 KB)": 2450,
+          "session.events() warm retained array: synthetic article (~35-45 KB)": 2680,
+          "parse(): same-size mixed (~8 KB)": 928.59,
+          "parseWithDiagnostics(): same-size pathological (~8 KB)": 3010,
+          "session.events() cold: same-size mixed (~8 KB)": 649.98,
+          "session.events() warm: same-size mixed (~8 KB)": 786.69,
+          "session.parse() cold: same-size mixed (~8 KB)": 913.46,
+          "session.parse() warm: same-size mixed (~8 KB)": 915.98,
+          "session.parseWithDiagnostics() cold: same-size pathological (~8 KB)": 3050,
+          "session.parseWithDiagnostics() warm: same-size pathological (~8 KB)": 2990,
+          "parse(): synthetic article (~35-45 KB)": 3190,
+          "session.events() warm: synthetic article (~35-45 KB)": 2730,
+          "session.parse() warm: synthetic article (~35-45 KB)": 3200,
+          "session.parseWithDiagnostics() warm: synthetic article (~35-45 KB)": 3520
+        }
+      },
+      {
+        "index": 4,
+        "benchmarks": {
+          "events() no position access: same-size plain (~8 KB)": 360.05,
+          "events() no position access: same-size mixed (~8 KB)": 615.46,
+          "events() no position access: same-size pathological (~8 KB)": 2610,
+          "events() offsets only: same-size mixed (~8 KB)": 446.74,
+          "events() offsets only: same-size pathological (~8 KB)": 2510,
+          "events() all position reads: same-size mixed (~8 KB)": 448.28,
+          "events() all position reads: same-size pathological (~8 KB)": 2570,
+          "events() enter props reads: same-size mixed (~8 KB)": 470.22,
+          "events() enter props reads: same-size pathological (~8 KB)": 2510,
+          "events() retained array only: same-size mixed (~8 KB)": 568.97,
+          "session.events() warm retained array: same-size mixed (~8 KB)": 773.12,
+          "events() retained array only: synthetic article (~35-45 KB)": 1960,
+          "session.events() warm retained array: synthetic article (~35-45 KB)": 2790,
+          "parse(): same-size mixed (~8 KB)": 942.13,
+          "parseWithDiagnostics(): same-size pathological (~8 KB)": 3040,
+          "session.events() cold: same-size mixed (~8 KB)": 675.18,
+          "session.events() warm: same-size mixed (~8 KB)": 804.65,
+          "session.parse() cold: same-size mixed (~8 KB)": 967.34,
+          "session.parse() warm: same-size mixed (~8 KB)": 1090,
+          "session.parseWithDiagnostics() cold: same-size pathological (~8 KB)": 3570,
+          "session.parseWithDiagnostics() warm: same-size pathological (~8 KB)": 3540,
+          "parse(): synthetic article (~35-45 KB)": 4019.9999999999995,
+          "session.events() warm: synthetic article (~35-45 KB)": 2930,
+          "session.parse() warm: synthetic article (~35-45 KB)": 3520,
+          "session.parseWithDiagnostics() warm: synthetic article (~35-45 KB)": 3310
+        }
+      },
+      {
+        "index": 5,
+        "benchmarks": {
+          "events() no position access: same-size plain (~8 KB)": 360.89,
+          "events() no position access: same-size mixed (~8 KB)": 633.16,
+          "events() no position access: same-size pathological (~8 KB)": 2580,
+          "events() offsets only: same-size mixed (~8 KB)": 495.17,
+          "events() offsets only: same-size pathological (~8 KB)": 2400,
+          "events() all position reads: same-size mixed (~8 KB)": 438.61,
+          "events() all position reads: same-size pathological (~8 KB)": 2440,
+          "events() enter props reads: same-size mixed (~8 KB)": 453.08,
+          "events() enter props reads: same-size pathological (~8 KB)": 2470,
+          "events() retained array only: same-size mixed (~8 KB)": 458.5,
+          "session.events() warm retained array: same-size mixed (~8 KB)": 736.96,
+          "events() retained array only: synthetic article (~35-45 KB)": 1920,
+          "session.events() warm retained array: synthetic article (~35-45 KB)": 2650,
+          "parse(): same-size mixed (~8 KB)": 905.67,
+          "parseWithDiagnostics(): same-size pathological (~8 KB)": 2960,
+          "session.events() cold: same-size mixed (~8 KB)": 650.75,
+          "session.events() warm: same-size mixed (~8 KB)": 765.19,
+          "session.parse() cold: same-size mixed (~8 KB)": 990.24,
+          "session.parse() warm: same-size mixed (~8 KB)": 935.42,
+          "session.parseWithDiagnostics() cold: same-size pathological (~8 KB)": 3000,
+          "session.parseWithDiagnostics() warm: same-size pathological (~8 KB)": 3000,
+          "parse(): synthetic article (~35-45 KB)": 3330,
+          "session.events() warm: synthetic article (~35-45 KB)": 2790,
+          "session.parse() warm: synthetic article (~35-45 KB)": 3320,
+          "session.parseWithDiagnostics() warm: synthetic article (~35-45 KB)": 3310
+        }
+      },
+      {
+        "index": 6,
+        "benchmarks": {
+          "events() no position access: same-size plain (~8 KB)": 319.93,
+          "events() no position access: same-size mixed (~8 KB)": 627.89,
+          "events() no position access: same-size pathological (~8 KB)": 2520,
+          "events() offsets only: same-size mixed (~8 KB)": 464.17,
+          "events() offsets only: same-size pathological (~8 KB)": 2460,
+          "events() all position reads: same-size mixed (~8 KB)": 455.47,
+          "events() all position reads: same-size pathological (~8 KB)": 2450,
+          "events() enter props reads: same-size mixed (~8 KB)": 456.39,
+          "events() enter props reads: same-size pathological (~8 KB)": 2500,
+          "events() retained array only: same-size mixed (~8 KB)": 449.74,
+          "session.events() warm retained array: same-size mixed (~8 KB)": 756.49,
+          "events() retained array only: synthetic article (~35-45 KB)": 1900,
+          "session.events() warm retained array: synthetic article (~35-45 KB)": 2600,
+          "parse(): same-size mixed (~8 KB)": 877.6,
+          "parseWithDiagnostics(): same-size pathological (~8 KB)": 2970,
+          "session.events() cold: same-size mixed (~8 KB)": 649.11,
+          "session.events() warm: same-size mixed (~8 KB)": 759,
+          "session.parse() cold: same-size mixed (~8 KB)": 914.88,
+          "session.parse() warm: same-size mixed (~8 KB)": 883.7,
+          "session.parseWithDiagnostics() cold: same-size pathological (~8 KB)": 3030,
+          "session.parseWithDiagnostics() warm: same-size pathological (~8 KB)": 3040,
+          "parse(): synthetic article (~35-45 KB)": 3200,
+          "session.events() warm: synthetic article (~35-45 KB)": 2780,
+          "session.parse() warm: synthetic article (~35-45 KB)": 3300,
+          "session.parseWithDiagnostics() warm: synthetic article (~35-45 KB)": 3230
+        }
+      },
+      {
+        "index": 7,
+        "benchmarks": {
+          "events() no position access: same-size plain (~8 KB)": 321.22,
+          "events() no position access: same-size mixed (~8 KB)": 539.54,
+          "events() no position access: same-size pathological (~8 KB)": 2590,
+          "events() offsets only: same-size mixed (~8 KB)": 473.89,
+          "events() offsets only: same-size pathological (~8 KB)": 2410,
+          "events() all position reads: same-size mixed (~8 KB)": 435.28,
+          "events() all position reads: same-size pathological (~8 KB)": 2410,
+          "events() enter props reads: same-size mixed (~8 KB)": 438.68,
+          "events() enter props reads: same-size pathological (~8 KB)": 2420,
+          "events() retained array only: same-size mixed (~8 KB)": 437.14,
+          "session.events() warm retained array: same-size mixed (~8 KB)": 739.25,
+          "events() retained array only: synthetic article (~35-45 KB)": 1890,
+          "session.events() warm retained array: synthetic article (~35-45 KB)": 2630,
+          "parse(): same-size mixed (~8 KB)": 858.43,
+          "parseWithDiagnostics(): same-size pathological (~8 KB)": 2960,
+          "session.events() cold: same-size mixed (~8 KB)": 633.4,
+          "session.events() warm: same-size mixed (~8 KB)": 762.98,
+          "session.parse() cold: same-size mixed (~8 KB)": 895.82,
+          "session.parse() warm: same-size mixed (~8 KB)": 881.62,
+          "session.parseWithDiagnostics() cold: same-size pathological (~8 KB)": 3010,
+          "session.parseWithDiagnostics() warm: same-size pathological (~8 KB)": 2990,
+          "parse(): synthetic article (~35-45 KB)": 3160,
+          "session.events() warm: synthetic article (~35-45 KB)": 2780,
+          "session.parse() warm: synthetic article (~35-45 KB)": 3260,
+          "session.parseWithDiagnostics() warm: synthetic article (~35-45 KB)": 3260
+        }
+      },
+      {
+        "index": 8,
+        "benchmarks": {
+          "events() no position access: same-size plain (~8 KB)": 313.08,
+          "events() no position access: same-size mixed (~8 KB)": 565.61,
+          "events() no position access: same-size pathological (~8 KB)": 2640,
+          "events() offsets only: same-size mixed (~8 KB)": 471.47,
+          "events() offsets only: same-size pathological (~8 KB)": 2460,
+          "events() all position reads: same-size mixed (~8 KB)": 447.62,
+          "events() all position reads: same-size pathological (~8 KB)": 2480,
+          "events() enter props reads: same-size mixed (~8 KB)": 454.89,
+          "events() enter props reads: same-size pathological (~8 KB)": 2460,
+          "events() retained array only: same-size mixed (~8 KB)": 446.95,
+          "session.events() warm retained array: same-size mixed (~8 KB)": 761.68,
+          "events() retained array only: synthetic article (~35-45 KB)": 1890,
+          "session.events() warm retained array: synthetic article (~35-45 KB)": 2650,
+          "parse(): same-size mixed (~8 KB)": 923.47,
+          "parseWithDiagnostics(): same-size pathological (~8 KB)": 3010,
+          "session.events() cold: same-size mixed (~8 KB)": 643.99,
+          "session.events() warm: same-size mixed (~8 KB)": 777.78,
+          "session.parse() cold: same-size mixed (~8 KB)": 898.54,
+          "session.parse() warm: same-size mixed (~8 KB)": 902.81,
+          "session.parseWithDiagnostics() cold: same-size pathological (~8 KB)": 3050,
+          "session.parseWithDiagnostics() warm: same-size pathological (~8 KB)": 3080,
+          "parse(): synthetic article (~35-45 KB)": 3300,
+          "session.events() warm: synthetic article (~35-45 KB)": 2750,
+          "session.parse() warm: synthetic article (~35-45 KB)": 3310,
+          "session.parseWithDiagnostics() warm: synthetic article (~35-45 KB)": 3260
+        }
+      },
+      {
+        "index": 9,
+        "benchmarks": {
+          "events() no position access: same-size plain (~8 KB)": 345.29,
+          "events() no position access: same-size mixed (~8 KB)": 607.24,
+          "events() no position access: same-size pathological (~8 KB)": 2510,
+          "events() offsets only: same-size mixed (~8 KB)": 451.14,
+          "events() offsets only: same-size pathological (~8 KB)": 2500,
+          "events() all position reads: same-size mixed (~8 KB)": 471.29,
+          "events() all position reads: same-size pathological (~8 KB)": 2650,
+          "events() enter props reads: same-size mixed (~8 KB)": 463.93,
+          "events() enter props reads: same-size pathological (~8 KB)": 2460,
+          "events() retained array only: same-size mixed (~8 KB)": 427.4,
+          "session.events() warm retained array: same-size mixed (~8 KB)": 731.14,
+          "events() retained array only: synthetic article (~35-45 KB)": 1860,
+          "session.events() warm retained array: synthetic article (~35-45 KB)": 2720,
+          "parse(): same-size mixed (~8 KB)": 899.4,
+          "parseWithDiagnostics(): same-size pathological (~8 KB)": 3060,
+          "session.events() cold: same-size mixed (~8 KB)": 659.52,
+          "session.events() warm: same-size mixed (~8 KB)": 809.82,
+          "session.parse() cold: same-size mixed (~8 KB)": 920.06,
+          "session.parse() warm: same-size mixed (~8 KB)": 925.02,
+          "session.parseWithDiagnostics() cold: same-size pathological (~8 KB)": 3070,
+          "session.parseWithDiagnostics() warm: same-size pathological (~8 KB)": 3090,
+          "parse(): synthetic article (~35-45 KB)": 3290,
+          "session.events() warm: synthetic article (~35-45 KB)": 2800,
+          "session.parse() warm: synthetic article (~35-45 KB)": 3240,
+          "session.parseWithDiagnostics() warm: synthetic article (~35-45 KB)": 3330
+        }
+      }
+    ],
+    "summary": {
+      "events() no position access: same-size plain (~8 KB)": {
+        "samples": [
+          379.63,
+          320.15,
+          342.87,
+          335.33,
+          360.05,
+          360.89,
+          319.93,
+          321.22,
+          313.08,
+          345.29
+        ],
+        "mean": 339.84399999999994,
+        "median": 339.1,
+        "minimum": 313.08,
+        "maximum": 379.63,
+        "stdev": 21.961886783951673
+      },
+      "events() no position access: same-size mixed (~8 KB)": {
+        "samples": [
+          612.09,
+          732.59,
+          767.85,
+          563.92,
+          615.46,
+          633.16,
+          627.89,
+          539.54,
+          565.61,
+          607.24
+        ],
+        "mean": 626.535,
+        "median": 613.7750000000001,
+        "minimum": 539.54,
+        "maximum": 767.85,
+        "stdev": 72.39364110349904
+      },
+      "events() no position access: same-size pathological (~8 KB)": {
+        "samples": [
+          2590,
+          2710,
+          2640,
+          2550,
+          2610,
+          2580,
+          2520,
+          2590,
+          2640,
+          2510
+        ],
+        "mean": 2594,
+        "median": 2590,
+        "minimum": 2510,
+        "maximum": 2710,
+        "stdev": 60.22181221672648
+      },
+      "events() offsets only: same-size mixed (~8 KB)": {
+        "samples": [
+          502.46,
+          471.3,
+          473.89,
+          453.63,
+          446.74,
+          495.17,
+          464.17,
+          473.89,
+          471.47,
+          451.14
+        ],
+        "mean": 470.3860000000001,
+        "median": 471.385,
+        "minimum": 446.74,
+        "maximum": 502.46,
+        "stdev": 18.007710200540952
+      },
+      "events() offsets only: same-size pathological (~8 KB)": {
+        "samples": [
+          2510,
+          2510,
+          2480,
+          2630,
+          2510,
+          2400,
+          2460,
+          2410,
+          2460,
+          2500
+        ],
+        "mean": 2487,
+        "median": 2490,
+        "minimum": 2400,
+        "maximum": 2630,
+        "stdev": 64.29964575675704
+      },
+      "events() all position reads: same-size mixed (~8 KB)": {
+        "samples": [
+          525.29,
+          454.34,
+          448.95,
+          477.22,
+          448.28,
+          438.61,
+          455.47,
+          435.28,
+          447.62,
+          471.29
+        ],
+        "mean": 460.23499999999996,
+        "median": 451.645,
+        "minimum": 435.28,
+        "maximum": 525.29,
+        "stdev": 26.28923871515153
+      },
+      "events() all position reads: same-size pathological (~8 KB)": {
+        "samples": [
+          2820,
+          2490,
+          2480,
+          2550,
+          2570,
+          2440,
+          2450,
+          2410,
+          2480,
+          2650
+        ],
+        "mean": 2534,
+        "median": 2485,
+        "minimum": 2410,
+        "maximum": 2820,
+        "stdev": 122.85492799775406
+      },
+      "events() enter props reads: same-size mixed (~8 KB)": {
+        "samples": [
+          593.41,
+          446.72,
+          478.14,
+          473.54,
+          470.22,
+          453.08,
+          456.39,
+          438.68,
+          454.89,
+          463.93
+        ],
+        "mean": 472.9,
+        "median": 460.15999999999997,
+        "minimum": 438.68,
+        "maximum": 593.41,
+        "stdev": 44.076126064899206
+      },
+      "events() enter props reads: same-size pathological (~8 KB)": {
+        "samples": [
+          2670,
+          2480,
+          2500,
+          2470,
+          2510,
+          2470,
+          2500,
+          2420,
+          2460,
+          2460
+        ],
+        "mean": 2494,
+        "median": 2475,
+        "minimum": 2420,
+        "maximum": 2670,
+        "stdev": 67.0323305079969
+      },
+      "events() retained array only: same-size mixed (~8 KB)": {
+        "samples": [
+          503.21,
+          456.78,
+          443.54,
+          479.57,
+          568.97,
+          458.5,
+          449.74,
+          437.14,
+          446.95,
+          427.4
+        ],
+        "mean": 467.17999999999995,
+        "median": 453.26,
+        "minimum": 427.4,
+        "maximum": 568.97,
+        "stdev": 41.83763005822497
+      },
+      "session.events() warm retained array: same-size mixed (~8 KB)": {
+        "samples": [
+          979.19,
+          777.58,
+          757.13,
+          774.32,
+          773.12,
+          736.96,
+          756.49,
+          739.25,
+          761.68,
+          731.14
+        ],
+        "mean": 778.686,
+        "median": 759.405,
+        "minimum": 731.14,
+        "maximum": 979.19,
+        "stdev": 72.30838774151847
+      },
+      "events() retained array only: synthetic article (~35-45 KB)": {
+        "samples": [
+          2180,
+          1880,
+          1890,
+          2450,
+          1960,
+          1920,
+          1900,
+          1890,
+          1890,
+          1860
+        ],
+        "mean": 1982,
+        "median": 1895,
+        "minimum": 1860,
+        "maximum": 2450,
+        "stdev": 188.5500228350851
+      },
+      "session.events() warm retained array: synthetic article (~35-45 KB)": {
+        "samples": [
+          2760,
+          2650,
+          2600,
+          2680,
+          2790,
+          2650,
+          2600,
+          2630,
+          2650,
+          2720
+        ],
+        "mean": 2673,
+        "median": 2650,
+        "minimum": 2600,
+        "maximum": 2790,
+        "stdev": 64.64432603785802
+      },
+      "parse(): same-size mixed (~8 KB)": {
+        "samples": [
+          960.21,
+          936.37,
+          899.49,
+          928.59,
+          942.13,
+          905.67,
+          877.6,
+          858.43,
+          923.47,
+          899.4
+        ],
+        "mean": 913.1360000000001,
+        "median": 914.5699999999999,
+        "minimum": 858.43,
+        "maximum": 960.21,
+        "stdev": 30.96276588276816
+      },
+      "parseWithDiagnostics(): same-size pathological (~8 KB)": {
+        "samples": [
+          3050,
+          3010,
+          3070,
+          3010,
+          3040,
+          2960,
+          2970,
+          2960,
+          3010,
+          3060
+        ],
+        "mean": 3014,
+        "median": 3010,
+        "minimum": 2960,
+        "maximum": 3070,
+        "stdev": 40.879225911349046
+      },
+      "session.events() cold: same-size mixed (~8 KB)": {
+        "samples": [
+          656.2,
+          649.76,
+          653.17,
+          649.98,
+          675.18,
+          650.75,
+          649.11,
+          633.4,
+          643.99,
+          659.52
+        ],
+        "mean": 652.106,
+        "median": 650.365,
+        "minimum": 633.4,
+        "maximum": 675.18,
+        "stdev": 10.759450832743372
+      },
+      "session.events() warm: same-size mixed (~8 KB)": {
+        "samples": [
+          778.61,
+          778.19,
+          794.82,
+          786.69,
+          804.65,
+          765.19,
+          759,
+          762.98,
+          777.78,
+          809.82
+        ],
+        "mean": 781.773,
+        "median": 778.4000000000001,
+        "minimum": 759,
+        "maximum": 809.82,
+        "stdev": 17.28827865604002
+      },
+      "session.parse() cold: same-size mixed (~8 KB)": {
+        "samples": [
+          965.82,
+          939.36,
+          951.02,
+          913.46,
+          967.34,
+          990.24,
+          914.88,
+          895.82,
+          898.54,
+          920.06
+        ],
+        "mean": 935.6539999999999,
+        "median": 929.71,
+        "minimum": 895.82,
+        "maximum": 990.24,
+        "stdev": 32.102218753364845
+      },
+      "session.parse() warm: same-size mixed (~8 KB)": {
+        "samples": [
+          948.96,
+          944.52,
+          923.36,
+          915.98,
+          1090,
+          935.42,
+          883.7,
+          881.62,
+          902.81,
+          925.02
+        ],
+        "mean": 935.1389999999999,
+        "median": 924.19,
+        "minimum": 881.62,
+        "maximum": 1090,
+        "stdev": 59.09000299919136
+      },
+      "session.parseWithDiagnostics() cold: same-size pathological (~8 KB)": {
+        "samples": [
+          3080,
+          3020,
+          3100,
+          3050,
+          3570,
+          3000,
+          3030,
+          3010,
+          3050,
+          3070
+        ],
+        "mean": 3098,
+        "median": 3050,
+        "minimum": 3000,
+        "maximum": 3570,
+        "stdev": 168.83917396939216
+      },
+      "session.parseWithDiagnostics() warm: same-size pathological (~8 KB)": {
+        "samples": [
+          3120,
+          3070,
+          3130,
+          2990,
+          3540,
+          3000,
+          3040,
+          2990,
+          3080,
+          3090
+        ],
+        "mean": 3105,
+        "median": 3075,
+        "minimum": 2990,
+        "maximum": 3540,
+        "stdev": 161.19346554166933
+      },
+      "parse(): synthetic article (~35-45 KB)": {
+        "samples": [
+          3320,
+          3360,
+          3240,
+          3190,
+          4019.9999999999995,
+          3330,
+          3200,
+          3160,
+          3300,
+          3290
+        ],
+        "mean": 3341,
+        "median": 3295,
+        "minimum": 3160,
+        "maximum": 4019.9999999999995,
+        "stdev": 247.6309978801342
+      },
+      "session.events() warm: synthetic article (~35-45 KB)": {
+        "samples": [
+          2780,
+          2750,
+          3710,
+          2730,
+          2930,
+          2790,
+          2780,
+          2780,
+          2750,
+          2800
+        ],
+        "mean": 2880,
+        "median": 2780,
+        "minimum": 2730,
+        "maximum": 3710,
+        "stdev": 296.68539266742175
+      },
+      "session.parse() warm: synthetic article (~35-45 KB)": {
+        "samples": [
+          3270,
+          3440,
+          3470,
+          3200,
+          3520,
+          3320,
+          3300,
+          3260,
+          3310,
+          3240
+        ],
+        "mean": 3333,
+        "median": 3305,
+        "minimum": 3200,
+        "maximum": 3520,
+        "stdev": 106.77598564804312
+      },
+      "session.parseWithDiagnostics() warm: synthetic article (~35-45 KB)": {
+        "samples": [
+          3360,
+          3320,
+          3290,
+          3520,
+          3310,
+          3310,
+          3230,
+          3260,
+          3260,
+          3330
+        ],
+        "mean": 3319,
+        "median": 3310,
+        "minimum": 3230,
+        "maximum": 3520,
+        "stdev": 80.33955715862793
+      }
+    }
+  },
+  "memory": {
+    "per_run": [
+      {
+        "index": 0,
+        "inputs": {
+          "same-size mixed (~8 KB)": {
+            "events retained, no position reads": 231856,
+            "events retained, then read every position": 228456,
+            "events retained, then read enter props": 250824,
+            "session warm event cache retained": 271200,
+            "parse() result retained": 288184,
+            "parseWithDiagnostics() result retained": 249064
+          },
+          "synthetic article (~35-45 KB)": {
+            "events retained, no position reads": 895136,
+            "events retained, then read every position": 847144,
+            "events retained, then read enter props": 846272,
+            "session warm event cache retained": 971000,
+            "parse() result retained": 986488,
+            "parseWithDiagnostics() result retained": 970400
+          }
+        }
+      },
+      {
+        "index": 1,
+        "inputs": {
+          "same-size mixed (~8 KB)": {
+            "events retained, no position reads": 241008,
+            "events retained, then read every position": 225704,
+            "events retained, then read enter props": 247712,
+            "session warm event cache retained": 254992,
+            "parse() result retained": 288368,
+            "parseWithDiagnostics() result retained": 249064
+          },
+          "synthetic article (~35-45 KB)": {
+            "events retained, no position reads": 903512,
+            "events retained, then read every position": 847144,
+            "events retained, then read enter props": 846272,
+            "session warm event cache retained": 971000,
+            "parse() result retained": 985920,
+            "parseWithDiagnostics() result retained": 986376
+          }
+        }
+      },
+      {
+        "index": 2,
+        "inputs": {
+          "same-size mixed (~8 KB)": {
+            "events retained, no position reads": 231856,
+            "events retained, then read every position": 228456,
+            "events retained, then read enter props": 250824,
+            "session warm event cache retained": 254992,
+            "parse() result retained": 288184,
+            "parseWithDiagnostics() result retained": 249064
+          },
+          "synthetic article (~35-45 KB)": {
+            "events retained, no position reads": 873768,
+            "events retained, then read every position": 847144,
+            "events retained, then read enter props": 846272,
+            "session warm event cache retained": 971000,
+            "parse() result retained": 986488,
+            "parseWithDiagnostics() result retained": 978632
+          }
+        }
+      },
+      {
+        "index": 3,
+        "inputs": {
+          "same-size mixed (~8 KB)": {
+            "events retained, no position reads": 231856,
+            "events retained, then read every position": 228456,
+            "events retained, then read enter props": 250824,
+            "session warm event cache retained": 254992,
+            "parse() result retained": 264768,
+            "parseWithDiagnostics() result retained": 249064
+          },
+          "synthetic article (~35-45 KB)": {
+            "events retained, no position reads": 895440,
+            "events retained, then read every position": 846200,
+            "events retained, then read enter props": 846272,
+            "session warm event cache retained": 971000,
+            "parse() result retained": 986488,
+            "parseWithDiagnostics() result retained": 986120
+          }
+        }
+      },
+      {
+        "index": 4,
+        "inputs": {
+          "same-size mixed (~8 KB)": {
+            "events retained, no position reads": 225208,
+            "events retained, then read every position": 228456,
+            "events retained, then read enter props": 243552,
+            "session warm event cache retained": 254376,
+            "parse() result retained": 288968,
+            "parseWithDiagnostics() result retained": 261648
+          },
+          "synthetic article (~35-45 KB)": {
+            "events retained, no position reads": 873696,
+            "events retained, then read every position": 847144,
+            "events retained, then read enter props": 846272,
+            "session warm event cache retained": 971000,
+            "parse() result retained": 985920,
+            "parseWithDiagnostics() result retained": 985832
+          }
+        }
+      },
+      {
+        "index": 5,
+        "inputs": {
+          "same-size mixed (~8 KB)": {
+            "events retained, no position reads": 231856,
+            "events retained, then read every position": 228456,
+            "events retained, then read enter props": 255176,
+            "session warm event cache retained": 254992,
+            "parse() result retained": 277816,
+            "parseWithDiagnostics() result retained": 259288
+          },
+          "synthetic article (~35-45 KB)": {
+            "events retained, no position reads": 895224,
+            "events retained, then read every position": 846200,
+            "events retained, then read enter props": 846272,
+            "session warm event cache retained": 971000,
+            "parse() result retained": 986552,
+            "parseWithDiagnostics() result retained": 986376
+          }
+        }
+      },
+      {
+        "index": 6,
+        "inputs": {
+          "same-size mixed (~8 KB)": {
+            "events retained, no position reads": 231856,
+            "events retained, then read every position": 228456,
+            "events retained, then read enter props": 250824,
+            "session warm event cache retained": 254992,
+            "parse() result retained": 288472,
+            "parseWithDiagnostics() result retained": 249064
+          },
+          "synthetic article (~35-45 KB)": {
+            "events retained, no position reads": 873696,
+            "events retained, then read every position": 846200,
+            "events retained, then read enter props": 846272,
+            "session warm event cache retained": 971000,
+            "parse() result retained": 986488,
+            "parseWithDiagnostics() result retained": 978632
+          }
+        }
+      },
+      {
+        "index": 7,
+        "inputs": {
+          "same-size mixed (~8 KB)": {
+            "events retained, no position reads": 231856,
+            "events retained, then read every position": 228456,
+            "events retained, then read enter props": 247664,
+            "session warm event cache retained": 272536,
+            "parse() result retained": 287968,
+            "parseWithDiagnostics() result retained": 249064
+          },
+          "synthetic article (~35-45 KB)": {
+            "events retained, no position reads": 895440,
+            "events retained, then read every position": 846200,
+            "events retained, then read enter props": 846272,
+            "session warm event cache retained": 971000,
+            "parse() result retained": 986488,
+            "parseWithDiagnostics() result retained": 986520
+          }
+        }
+      },
+      {
+        "index": 8,
+        "inputs": {
+          "same-size mixed (~8 KB)": {
+            "events retained, no position reads": 231856,
+            "events retained, then read every position": 228456,
+            "events retained, then read enter props": 250824,
+            "session warm event cache retained": 254992,
+            "parse() result retained": 249328,
+            "parseWithDiagnostics() result retained": 249064
+          },
+          "synthetic article (~35-45 KB)": {
+            "events retained, no position reads": 873800,
+            "events retained, then read every position": 847144,
+            "events retained, then read enter props": 846272,
+            "session warm event cache retained": 971000,
+            "parse() result retained": 986488,
+            "parseWithDiagnostics() result retained": 986376
+          }
+        }
+      },
+      {
+        "index": 9,
+        "inputs": {
+          "same-size mixed (~8 KB)": {
+            "events retained, no position reads": 231856,
+            "events retained, then read every position": 228456,
+            "events retained, then read enter props": 250824,
+            "session warm event cache retained": 254992,
+            "parse() result retained": 266232,
+            "parseWithDiagnostics() result retained": 249064
+          },
+          "synthetic article (~35-45 KB)": {
+            "events retained, no position reads": 873696,
+            "events retained, then read every position": 847144,
+            "events retained, then read enter props": 846272,
+            "session warm event cache retained": 971000,
+            "parse() result retained": 986488,
+            "parseWithDiagnostics() result retained": 986424
+          }
+        }
+      }
+    ],
+    "summary": {
+      "same-size mixed (~8 KB)": {
+        "events retained, no position reads": {
+          "samples": [
+            231856,
+            241008,
+            231856,
+            231856,
+            225208,
+            231856,
+            231856,
+            231856,
+            231856,
+            231856
+          ],
+          "mean": 232106.4,
+          "median": 231856,
+          "minimum": 225208,
+          "maximum": 241008,
+          "stdev": 3761.323738614727
+        },
+        "events retained, then read every position": {
+          "samples": [
+            228456,
+            225704,
+            228456,
+            228456,
+            228456,
+            228456,
+            228456,
+            228456,
+            228456,
+            228456
+          ],
+          "mean": 228180.8,
+          "median": 228456,
+          "minimum": 225704,
+          "maximum": 228456,
+          "stdev": 870.2588120783381
+        },
+        "events retained, then read enter props": {
+          "samples": [
+            250824,
+            247712,
+            250824,
+            250824,
+            243552,
+            255176,
+            250824,
+            247664,
+            250824,
+            250824
+          ],
+          "mean": 249904.8,
+          "median": 250824,
+          "minimum": 243552,
+          "maximum": 255176,
+          "stdev": 3037.5930822500454
+        },
+        "session warm event cache retained": {
+          "samples": [
+            271200,
+            254992,
+            254992,
+            254992,
+            254376,
+            254992,
+            254992,
+            272536,
+            254992,
+            254992
+          ],
+          "mean": 258305.6,
+          "median": 254992,
+          "minimum": 254376,
+          "maximum": 272536,
+          "stdev": 7157.522898632211
+        },
+        "parse() result retained": {
+          "samples": [
+            288184,
+            288368,
+            288184,
+            264768,
+            288968,
+            277816,
+            288472,
+            287968,
+            249328,
+            266232
+          ],
+          "mean": 278828.8,
+          "median": 288076,
+          "minimum": 249328,
+          "maximum": 288968,
+          "stdev": 14035.922016185628
+        },
+        "parseWithDiagnostics() result retained": {
+          "samples": [
+            249064,
+            249064,
+            249064,
+            249064,
+            261648,
+            259288,
+            249064,
+            249064,
+            249064,
+            249064
+          ],
+          "mean": 251344.8,
+          "median": 249064,
+          "minimum": 249064,
+          "maximum": 261648,
+          "stdev": 4840.417172104074
+        }
+      },
+      "synthetic article (~35-45 KB)": {
+        "events retained, no position reads": {
+          "samples": [
+            895136,
+            903512,
+            873768,
+            895440,
+            873696,
+            895224,
+            873696,
+            895440,
+            873800,
+            873696
+          ],
+          "mean": 885340.8,
+          "median": 884468,
+          "minimum": 873696,
+          "maximum": 903512,
+          "stdev": 12479.884443909461
+        },
+        "events retained, then read every position": {
+          "samples": [
+            847144,
+            847144,
+            847144,
+            846200,
+            847144,
+            846200,
+            846200,
+            846200,
+            847144,
+            847144
+          ],
+          "mean": 846766.4,
+          "median": 847144,
+          "minimum": 846200,
+          "maximum": 847144,
+          "stdev": 487.47950384264027
+        },
+        "events retained, then read enter props": {
+          "samples": [
+            846272,
+            846272,
+            846272,
+            846272,
+            846272,
+            846272,
+            846272,
+            846272,
+            846272,
+            846272
+          ],
+          "mean": 846272,
+          "median": 846272,
+          "minimum": 846272,
+          "maximum": 846272,
+          "stdev": 0
+        },
+        "session warm event cache retained": {
+          "samples": [
+            971000,
+            971000,
+            971000,
+            971000,
+            971000,
+            971000,
+            971000,
+            971000,
+            971000,
+            971000
+          ],
+          "mean": 971000,
+          "median": 971000,
+          "minimum": 971000,
+          "maximum": 971000,
+          "stdev": 0
+        },
+        "parse() result retained": {
+          "samples": [
+            986488,
+            985920,
+            986488,
+            986488,
+            985920,
+            986552,
+            986488,
+            986488,
+            986488,
+            986488
+          ],
+          "mean": 986380.8,
+          "median": 986488,
+          "minimum": 985920,
+          "maximum": 986552,
+          "stdev": 243.68139490371894
+        },
+        "parseWithDiagnostics() result retained": {
+          "samples": [
+            970400,
+            986376,
+            978632,
+            986120,
+            985832,
+            986376,
+            978632,
+            986520,
+            986376,
+            986424
+          ],
+          "mean": 983168.8,
+          "median": 986248,
+          "minimum": 970400,
+          "maximum": 986520,
+          "stdev": 5504.491515521161
+        }
+      }
+    }
+  }
+}
