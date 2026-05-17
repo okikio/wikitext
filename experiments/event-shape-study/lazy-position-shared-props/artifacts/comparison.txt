@@ -1,0 +1,16 @@
+baseline: current-baseline (perf-test-improve-event-shapes ffe74312)
+decision rule: target median >= +5.00%, critical regressions > -3.00% disallowed, Holm-adjusted alpha=0.050
+
+lazy-position-shared-props: not recommended
+report: experiments/event-shape-study/lazy-position-shared-props/artifacts/report.json
+target timing median: -107.05% (0/9 significant wins)
+memory median: -0.08% (6 significant wins)
+worst critical timing: -149.81% (9 significant regressions)
+top memory wins:
+- same-size mixed (~8 KB) :: events retained, no position reads: +9.34% [+9.34%, +9.34%], p_adj=0.00e+0
+- same-size mixed (~8 KB) :: events retained, then read enter props: +6.94% [+6.40%, +6.94%], p_adj=0.00e+0
+- synthetic article (~35-45 KB) :: events retained, no position reads: +5.64% [+3.46%, +5.14%], p_adj=0.00e+0
+critical timing risks:
+- parse(): same-size mixed (~8 KB): -149.81% [-151.48%, -142.31%], p_adj=0.00e+0
+- session.parse() cold: same-size mixed (~8 KB): -134.22% [-136.15%, -120.90%], p_adj=0.00e+0
+- session.parse() warm: same-size mixed (~8 KB): -133.42% [-136.66%, -124.56%], p_adj=0.00e+0

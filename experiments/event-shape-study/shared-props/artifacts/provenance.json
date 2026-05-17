@@ -1,0 +1,10 @@
+{
+  "source": "imported prior candidate artifact",
+  "report_origin": "/tmp/event-shape-shared-props-10x5.json",
+  "comparison_regenerated_against": "experiments/event-shape-study/current-baseline/artifacts/report.json",
+  "notes": [
+    "The shared-props candidate was collected before the study directory existed.",
+    "The report artifact was copied into the checked-in study directory unchanged.",
+    "The comparison artifacts were regenerated after the baseline was re-recorded into the study directory."
+  ]
+}

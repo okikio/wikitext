@@ -1,0 +1,1 @@
+mise x deno@latest -- deno run --no-lock --allow-run=mise,git --allow-read --allow-write experiments/event-shape-study/tools/collect_approach_report.ts --approach-dir=current-baseline --variant=current-baseline --runs=10 --memory-repeats=5 --out=experiments/event-shape-study/current-baseline/artifacts/report.json

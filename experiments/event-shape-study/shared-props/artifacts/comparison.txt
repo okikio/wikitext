@@ -1,0 +1,19 @@
+baseline: current-baseline (perf-test-improve-event-shapes ffe74312)
+decision rule: target median >= +5.00%, critical regressions > -3.00% disallowed, Holm-adjusted alpha=0.050
+
+shared-props: not recommended
+report: experiments/event-shape-study/shared-props/artifacts/report.json
+target timing median: +0.81% (0/9 significant wins)
+memory median: +4.02% (8 significant wins)
+worst critical timing: -0.24% (0 significant regressions)
+top timing wins:
+- events() no position access: same-size mixed (~8 KB): +2.90% [+0.53%, +6.65%], p_adj=2.70e-1
+- events() retained array only: same-size mixed (~8 KB): +1.70% [-0.02%, +3.83%], p_adj=4.79e-1
+- events() offsets only: same-size mixed (~8 KB): +0.94% [-0.21%, +3.50%], p_adj=5.82e-1
+top memory wins:
+- same-size mixed (~8 KB) :: events retained, then read enter props: +4.58% [+3.89%, +4.81%], p_adj=0.00e+0
+- synthetic article (~35-45 KB) :: events retained, then read every position: +4.55% [+4.54%, +4.61%], p_adj=0.00e+0
+- synthetic article (~35-45 KB) :: events retained, then read enter props: +4.55% [+4.18%, +4.55%], p_adj=0.00e+0
+critical timing risks:
+- session.parse() cold: same-size mixed (~8 KB): -0.24% [-0.72%, +4.71%], p_adj=1.00e+0
+- session.parse() warm: same-size mixed (~8 KB): -0.22% [-1.31%, +3.71%], p_adj=1.00e+0

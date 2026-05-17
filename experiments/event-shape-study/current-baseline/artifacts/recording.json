@@ -1,0 +1,18 @@
+{
+  "study": "event-shape",
+  "variant": "current-baseline",
+  "experiment_dir": "experiments/event-shape-study/current-baseline",
+  "report_path": "experiments/event-shape-study/current-baseline/artifacts/report.json",
+  "generated_at": "2026-05-17T07:08:02.424Z",
+  "runs": 10,
+  "memory_repeats": 5,
+  "minimum_improvement": 0.05,
+  "maximum_regression": 0.03,
+  "bootstrap_iterations": 5000,
+  "alpha": 0.05,
+  "branch": "perf-test-improve-event-shapes",
+  "commit": "ffe74312ed03a2b25f510ffa5786bcd4c65ba4a3",
+  "commands": [
+    "mise x deno@latest -- deno run --no-lock --allow-run=mise,git --allow-read --allow-write experiments/event-shape-study/tools/collect_approach_report.ts --approach-dir=current-baseline --variant=current-baseline --runs=10 --memory-repeats=5 --out=experiments/event-shape-study/current-baseline/artifacts/report.json"
+  ]
+}

@@ -1,0 +1,119 @@
+{
+  "baseline": {
+    "variant": "current-baseline",
+    "branch": "perf-test-improve-event-shapes",
+    "commit": "ffe74312ed03a2b25f510ffa5786bcd4c65ba4a3",
+    "path": "experiments/event-shape-study/current-baseline/artifacts/report.json"
+  },
+  "minimum_improvement": 0.05,
+  "maximum_regression": 0.03,
+  "bootstrap_iterations": 5000,
+  "alpha": 0.05,
+  "decisions": [
+    {
+      "variant": "shared-props",
+      "path": "experiments/event-shape-study/shared-props/artifacts/report.json",
+      "target_timing_median": 0.008064516129032258,
+      "memory_median": 0.04022306938480442,
+      "worst_critical_timing": -0.0023704171934260687,
+      "significant_target_wins": 0,
+      "significant_memory_wins": 8,
+      "significant_critical_regressions": 0,
+      "recommended": false,
+      "top_timing_wins": [
+        {
+          "name": "events() no position access: same-size mixed (~8 KB)",
+          "family": "timing",
+          "estimate": 0.028956763189210928,
+          "ci_lower": 0.005340761166022841,
+          "ci_upper": 0.06648092958719218,
+          "p_value": 0.0216,
+          "adjusted_p_value": 0.2704,
+          "significant_better": false,
+          "significant_worse": false
+        },
+        {
+          "name": "events() retained array only: same-size mixed (~8 KB)",
+          "family": "timing",
+          "estimate": 0.017042768354415753,
+          "ci_lower": -0.0002154459207995715,
+          "ci_upper": 0.03834580344294349,
+          "p_value": 0.0532,
+          "adjusted_p_value": 0.4788,
+          "significant_better": false,
+          "significant_worse": false
+        },
+        {
+          "name": "events() offsets only: same-size mixed (~8 KB)",
+          "family": "timing",
+          "estimate": 0.009425781821867369,
+          "ci_lower": -0.002129893844318911,
+          "ci_upper": 0.03502565218703775,
+          "p_value": 0.0832,
+          "adjusted_p_value": 0.5824,
+          "significant_better": false,
+          "significant_worse": false
+        }
+      ],
+      "top_memory_wins": [
+        {
+          "name": "same-size mixed (~8 KB) :: events retained, then read enter props",
+          "family": "memory",
+          "estimate": 0.04575319746116799,
+          "ci_lower": 0.0389417522028158,
+          "ci_upper": 0.04812448310326446,
+          "p_value": 0,
+          "adjusted_p_value": 0,
+          "significant_better": true,
+          "significant_worse": false
+        },
+        {
+          "name": "synthetic article (~35-45 KB) :: events retained, then read every position",
+          "family": "memory",
+          "estimate": 0.04551169936185299,
+          "ci_lower": 0.04539507764673851,
+          "ci_upper": 0.04609247595885837,
+          "p_value": 0,
+          "adjusted_p_value": 0,
+          "significant_better": true,
+          "significant_worse": false
+        },
+        {
+          "name": "synthetic article (~35-45 KB) :: events retained, then read enter props",
+          "family": "memory",
+          "estimate": 0.04550782727066475,
+          "ci_lower": 0.041791080873647586,
+          "ci_upper": 0.04550782727066475,
+          "p_value": 0,
+          "adjusted_p_value": 0,
+          "significant_better": true,
+          "significant_worse": false
+        }
+      ],
+      "critical_regressions": [
+        {
+          "name": "session.parse() cold: same-size mixed (~8 KB)",
+          "family": "timing",
+          "estimate": -0.0023704171934260687,
+          "ci_lower": -0.007179408491668015,
+          "ci_upper": 0.04710402260134664,
+          "p_value": 0.1692,
+          "adjusted_p_value": 1,
+          "significant_better": false,
+          "significant_worse": false
+        },
+        {
+          "name": "session.parse() warm: same-size mixed (~8 KB)",
+          "family": "timing",
+          "estimate": -0.0022155529556720263,
+          "ci_lower": -0.013080408085081006,
+          "ci_upper": 0.037053703766264046,
+          "p_value": 0.4628,
+          "adjusted_p_value": 1,
+          "significant_better": false,
+          "significant_worse": false
+        }
+      ]
+    }
+  ]
+}
