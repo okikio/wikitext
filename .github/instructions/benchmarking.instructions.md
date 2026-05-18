@@ -29,15 +29,16 @@ Do not benchmark the same precomputable literal in every iteration when that wou
 
 ## GC control
 
-Use `.gc('inner')` for allocation-heavy benchmarks.
+Choose GC mode based on what the benchmark allocates:
+
+* use `.gc('inner')` when each iteration creates enough short-lived objects that GC noise would dominate the result, such as full parse, tree build, or round-trip benchmarks on medium or large inputs
+* use `.gc('outer')` when the benchmark does less per-iteration allocation and you want lower harness overhead
 
 ```ts
 bench('parse: large article', () => {
   do_not_optimize(parse(largeArticle));
 }).gc('inner');
 ```
-
-Use `.gc('outer')` when you want lower overhead and can tolerate less stable per-iteration numbers.
 
 ## Scaling benchmarks
 
@@ -51,9 +52,9 @@ Benchmark against relevant alternatives on the same inputs.
 
 Keep competitor and local benchmarks in the same group when possible.
 
-## Benchmark realistic scenarios
+## Scenario coverage
 
-Do not rely only on tiny microbenchmarks.
+Do not rely only on tiny microbenchmarks. Cover both comparison quality and user-relevant behavior:
 
 Include representative scenarios such as:
 

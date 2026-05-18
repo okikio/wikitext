@@ -11,7 +11,7 @@ Apply these rules only when writing or revising:
 - version summaries
 - grouped change summaries
 
-Do not apply these rules to commit messages, PR prose, code comments, TSDoc, or general docs unless the task is specifically about changelog or release-note writing.
+Do not apply these rules to commit messages, PR prose, code comments, TSDoc, or general docs, except when you are explicitly tasked with changelog or release-note writing.
 
 A changelog is not a dump of commit history. It is a curated summary of what changed that helps users and maintainers understand what matters, what to pay attention to, and what actions they may need to take.
 
@@ -20,13 +20,11 @@ Write changelog entries so a reader can understand the outcome, the practical im
 
 ## Core goal
 
-Each changelog entry should make these questions easy to answer:
+Use this priority order when writing an entry:
 
-1. What changed for the reader?
-2. Why does it matter?
-3. What is newly possible, fixed, clarified, or removed?
-4. Does the reader need to migrate, reconfigure, or verify anything?
-5. If several commits fed this entry, what is the one story they add up to?
+1. State what changed for the reader, including any migration, reconfiguration, and/or verification steps.
+2. State why it matters, including what is now possible, fixed, clarified and/or removed.
+3. If several commits contributed, combine them into one coherent story.
 
 A changelog should preserve meaning, not every implementation detail.
 

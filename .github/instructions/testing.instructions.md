@@ -30,7 +30,11 @@ deno task test
 
 Test behavior, not implementation.
 
-Treat each module as a black box. Call the public API and assert on observable results.
+Use this priority order:
+
+1. Call the public API.
+2. Assert on return values and externally visible side effects.
+3. Add lower-level checks only when no public behavior makes the contract visible enough.
 
 Do not assert on private state, internal helpers, or incidental implementation details.
 

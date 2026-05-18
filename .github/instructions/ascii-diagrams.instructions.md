@@ -16,7 +16,7 @@ Good uses:
 - algorithm walkthroughs
 - edit or event flow
 
-Do not add diagrams for simple one-step logic or tiny APIs.
+Avoid diagrams for logic that only shows one computational step, such as a single function call, or for APIs that expose fewer than three distinct methods.
 
 Always pair a diagram with prose that explains:
 - what the reader is looking at

@@ -37,6 +37,8 @@ Weak:
 
 ## Description
 
+Apply the description rules in this section only to PR descriptions and merge summaries.
+
 Use this structure when relevant:
 
 * Summary
@@ -46,7 +48,7 @@ Use this structure when relevant:
 * Verification
 * Risk and rollout
 
-Not every PR needs every section. Prefer relevance over template ritual.
+Include only the sections that are directly relevant to the PR. Omit sections that do not apply to the changes being proposed.
 
 ### Writing rules
 
@@ -113,6 +115,8 @@ When relevant, state:
 * whether follow-up work is expected
 
 ## Design notes and specs
+
+Apply this section only when the PR needs a design note or spec-style explanation.
 
 When a PR introduces a non-trivial behavioral change or a new public API, include a design note with this shape:
 

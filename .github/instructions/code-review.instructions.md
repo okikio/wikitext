@@ -9,14 +9,14 @@ Apply these rules only when:
 - reviewing a diff
 - generating review comments
 - summarizing review findings
-- evaluating correctness, risk, or maintainability of a change
+- evaluating correctness, risk, or maintainability of a change during code review
 
 Do not apply these rules to ordinary coding, docs writing, or commit/PR authoring
 unless the task is explicitly a review.
 
 ## Review priorities
 
-Prioritize correctness, clarity, maintainability, and standards alignment.
+Focus first on correctness and safety. Then cover clarity, performance, maintainability, and standards alignment.
 
 Prefer fewer, higher-signal comments over noisy review spam.
 
@@ -39,7 +39,7 @@ Check:
 - does the change introduce hidden assumptions
 - does the change affect `deno doc --lint` compliance
 
-### 3. Types and narrowing
+### 3. Type safety and contracts
 
 Check:
 - avoid `any`
@@ -47,7 +47,7 @@ Check:
 - public signatures only reference exported public types
 - return types are explicit and narrow at module boundaries
 
-### 4. Readability and educational clarity
+### 4. Readability and reviewer clarity
 
 Check:
 - names reveal intent
@@ -62,7 +62,7 @@ If the code is correct but its purpose is hard to infer, suggest improving:
 - examples
 - diagrams
 
-### 5. Consistency and style
+### 5. Consistency with repo rules
 
 Check:
 - formatting matches the repo

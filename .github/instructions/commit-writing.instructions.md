@@ -13,18 +13,17 @@ A commit message is not just a Git label. It is a durable record for other devel
 
 Write commit messages so a reader can understand the important change without opening the diff first.
 
-Keep commit messages changelog-friendly, but do not write them like polished release notes. A commit should preserve implementation-relevant detail that may later help someone write a changelog.
+Keep commit messages clear enough that a changelog writer can reuse the key outcome later, but preserve the implementation-relevant detail and reasoning that release notes usually omit.
 
 
 ## Core goal
 
-Each commit message should make these questions easy to answer:
+Use this priority order when writing a commit message:
 
-1. What changed?
-2. Why did it matter?
-3. What behavior, workflow, edge case, or maintenance outcome changed?
-4. Does this have migration or upgrade impact?
-5. If a future changelog writer reads this commit, what details are worth carrying forward?
+1. State what changed.
+2. State what you were trying to achieve and why the change was needed.
+3. State any migration or upgrade impact.
+4. Preserve the behavior, workflow, edge case, reasoning, or maintenance details that a future changelog writer would need.
 
 The subject is the scan line.
 The body is where nuance goes.

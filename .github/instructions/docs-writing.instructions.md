@@ -14,24 +14,17 @@ When introducing a concept, prefer this narrative order:
 1. What it is
 2. What problem it solves
 3. What the reader gets from it
-4. How it works at a high level
+4. How it works at a high level, with a brief mention of why that approach was chosen
 5. Examples, assumptions, edge cases, limitations, and deeper detail
 
-Use this as a default shape, not a rigid template.
+Use this structure as a guideline, but adapt it when a different order makes the explanation clearer.
 
 ## Writing style
 
-- Use plain English.
-- Define technical terms the first time they matter.
-- Ground abstract ideas in something concrete before or while naming them.
-- Do not stop at a simpler rewording when the reader still cannot picture the idea.
-- Tie explanations to a real behavior, cost, failure mode, example, or downstream benefit.
-- Keep a steady narrative flow.
-- Prefer transition sentences over unnecessary headers.
-- Use active voice.
-- Use present tense where practical.
-- Use the subject's real name instead of vague passive phrasing.
-- Expand acronyms on first use.
+- Use plain English, active voice, and present tense where practical.
+- Define technical terms and acronyms the first time they matter.
+- Ground abstract ideas in something concrete before or while naming them, and tie them to a real behavior, cost, failure mode, example, or downstream benefit.
+- Keep a steady narrative flow. Prefer transition sentences over unnecessary headers, and use the subject's real name instead of vague passive phrasing.
 - Avoid em dashes.
 
 When a term is unfamiliar or domain-specific, explain it in a way a new reader can picture.

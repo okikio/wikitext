@@ -7,9 +7,9 @@ applyTo: "**/*.ts,**/*.tsx"
 
 ## Runtime and module model
 
-- Assume Deno v2, strict TypeScript, and ESM.
+- Assume Deno v2, strict TypeScript, and ESM. 
 - Keep modules tree-shakeable.
-- Avoid top-level side effects unless they are clearly required.
+- Avoid top-level side effects unless import-time work is required to initialize data that exported APIs read immediately, such as a module-local lookup table or a one-time registration owned by that module.
 - Avoid hidden global state.
 - Avoid surprising initialization during import.
 
@@ -66,11 +66,8 @@ Examples:
 For every exported function, interface, type alias, and constant:
 
 - Write TSDoc in familiar language that a reasonably experienced JavaScript or TypeScript developer would understand without pausing.
-- Explain why it exists, not just what it is.
-- Ground the explanation in the problem being solved, the approach taken, and the assumptions or edge cases.
-- If you need a technical term, explain the concrete behavior first, then introduce the term if it is still useful.
-- When using technical or abstract terms, define them in concrete language the reader can picture in this codebase.
-- Tie abstractions to a real behavior, cost, failure mode, or downstream benefit.
+- Explain why it exists, the problem it solves, and any important assumptions or edge cases.
+- Start with the concrete behavior in this codebase. If you still need a technical term, define it in plain language and tie it to a real behavior, cost, failure mode, or downstream benefit.
 - Every field of an exported interface or public type needs its own JSDoc comment.
 - Any type referenced in a public signature must itself be exported.
 
@@ -117,11 +114,9 @@ This especially applies to:
 
 When needed, include:
 
-* a short explanation of intent
-* the key assumptions
-* a step-by-step walkthrough
-* clarification of abstract codes or markers
-* a grounded explanation of technical terms
+* a short explanation of intent and key assumptions
+* a step-by-step walkthrough when control flow is hard to follow
+* clarification of abstract codes, markers, or technical terms
 * an ASCII diagram if it materially improves understanding
 
 ## Error handling

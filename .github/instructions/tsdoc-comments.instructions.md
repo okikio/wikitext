@@ -29,9 +29,7 @@ Then explain the high-level approach if the implementation model matters.
 
 Prefer compact, flowing prose unless the API is conceptually deep.
 
-Use plain English by default. When a technical term is worth keeping, define it in grounded language the first time it matters.
-
-Do not stop at a shorter or softer paraphrase if the reader still cannot picture what the concept means in this codebase.
+Use plain English by default. When a technical term is worth keeping, define it in grounded language the first time it matters, and tie it to concrete behavior in this codebase.
 
 Good:
 - `This scanner is lexical, which means it only recognizes raw delimiter shapes like [[, {{, or ==. It does not decide the final meaning of those characters yet.`
@@ -44,7 +42,7 @@ Weak:
 
 ## Section and header discipline in TSDoc
 
-Do not add section headers inside a doc block unless they improve navigation.
+Do not add section headers inside a doc block unless they provide clear structure that helps the reader understand the content.
 
 A section label must be specific and useful on its own.
 
@@ -76,17 +74,11 @@ This especially applies to:
 - tricky boolean conditions
 - domain-specific parsing terms
 
-When useful, include:
+When useful, explain:
 - the problem being handled
-- the key invariant and what it protects against
-- the step-by-step logic
-- a short example with real input or output
-- an ASCII diagram if it makes the logic easier to follow
-- the practical meaning of any jargon that remains
-
-A good explanation answers both of these:
-- `What does this term mean?`
-- `What does it mean here, in this code?`
+- the key invariant or decision and what it protects against
+- the step-by-step logic, example, or diagram that makes the behavior easier to follow
+- the practical meaning of any jargon that remains in this code
 
 ## Examples
 
