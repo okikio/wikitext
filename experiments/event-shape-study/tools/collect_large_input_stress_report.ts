@@ -13,6 +13,13 @@
 
 import { dirname, fromFileUrl, join, relative } from 'jsr:@std/path';
 
+type TextSource = {
+	length: number;
+	charCodeAt(index: number): number;
+	slice(start: number, end: number): string;
+	iterSlices?(start: number, end: number): Iterable<string>;
+};
+
 type NumericSummary = {
 	samples: number[];
 	mean: number;
@@ -24,23 +31,28 @@ type NumericSummary = {
 
 type StressSample = {
 	index: number;
+	status: 'ok' | 'failed';
 	elapsed_ms: number;
 	heap_delta_bytes: number;
-	checksum: number;
+	checksum: number | null;
+	error_message?: string;
 };
 
 type StressCaseSummary = {
 	name: string;
 	samples: StressSample[];
-	elapsed_ms: NumericSummary;
-	heap_delta_bytes: NumericSummary;
+	ok_sample_count: number;
+	failed_sample_count: number;
+	elapsed_ms: NumericSummary | null;
+	heap_delta_bytes: NumericSummary | null;
 };
 
 type StressReport = {
-	schema_version: 1;
+	schema_version: 2;
 	variant: string;
 	approach_dir: string;
 	generated_at: string;
+	profile: 'full' | 'streaming-only';
 	scenario: string;
 	size_bytes: number;
 	size_mib: number;
@@ -54,9 +66,9 @@ type StressReport = {
 };
 
 type ApproachModule = {
-	events(input: string): Iterable<unknown>;
-	parse(input: string): { children: unknown[] };
-	parseWithDiagnostics(input: string): {
+	events(input: TextSource): Iterable<unknown>;
+	parse(input: TextSource): { children: unknown[] };
+	parseWithDiagnostics(input: TextSource): {
 		tree: { children: unknown[] };
 		diagnostics: unknown[];
 	};
@@ -64,13 +76,13 @@ type ApproachModule = {
 
 type StressCase = {
 	name: string;
-	run: (approach: ApproachModule, input: string) => number;
+	run: (approach: ApproachModule, input: TextSource) => number;
 };
 
 type ScenarioDefinition = {
 	name: string;
 	description: string;
-	build: (size_bytes: number) => string;
+	build: (size_bytes: number) => TextSource;
 };
 
 type GcCapableGlobal = typeof globalThis & {
@@ -79,6 +91,10 @@ type GcCapableGlobal = typeof globalThis & {
 
 const STUDY_ROOT = fromFileUrl(new URL('../', import.meta.url));
 const REPO_ROOT = fromFileUrl(new URL('../../../', import.meta.url));
+
+function resolveOutputPath(raw_path: string): string {
+	return raw_path.startsWith('/') ? raw_path : join(REPO_ROOT, raw_path);
+}
 
 const PLAIN_UNIT = [
 	'Observational archives preserve calibration notes, weather corrections, and provenance language across long paragraphs of ordinary prose.',
@@ -113,6 +129,101 @@ const PATHOLOGICAL_UNIT = [
 	'',
 ].join('\n');
 
+const TABLE_HEAVY_UNIT = [
+	'{| class="wikitable sortable"',
+	'! Planet !! Radius !! Mass !! Notes',
+	'|-',
+	'| Mercury || 2,439.7 km || 3.30e23 kg || [[Inner planet]]',
+	'|-',
+	'| Venus || 6,051.8 km || 4.87e24 kg || {{Val|4.87|e=24|u=kg}}',
+	'|-',
+	'| Earth || 6,371.0 km || 5.97e24 kg || <ref name="earth">Reference</ref>',
+	'|-',
+	"| Mars || 3,389.5 km || 6.42e23 kg || ''Surveyed''",
+	'|}',
+	'',
+].join('\n');
+
+const TEMPLATE_HEAVY_UNIT = [
+	'{{Infobox settlement',
+	'| name = Example City',
+	'| image = {{Map frame|lat=51.5|lon=-0.1|zoom=12}}',
+	'| region = {{Plainlist|* [[Region A]]|* [[Region B]]}}',
+	'| population = {{Formatnum:1234567}}',
+	'| leader = {{Person|name=Alex Example|title=Mayor}}',
+	'}}',
+	'{{Navbox|title=Transit|list1={{Flatlist|* Line A * Line B * Line C}}}}',
+	'{{Citation needed|date={{Start date|2024|05|17}}}}',
+	'',
+].join('\n');
+
+const INLINE_HEAVY_UNIT = [
+	'== Inline ==',
+	"A [[Main Page|home]] link with ''italic'', '''bold''', and '''''both'''''.",
+	'<ref name="cite-1" group="note">Example &amp; entity with {{Citation|title=Doc}}</ref>',
+	'<span class="lead">inline tag</span> and <br/> break and <nowiki>[[literal]] {{literal}}</nowiki>.',
+	'[https://example.com Example] {{Card|name=value|body=<span>ok</span>}} __TOC__ ~~~~',
+	'',
+].join('\n');
+
+const URI_HEAVY_UNIT = [
+	'Visit https://example.com/path(test)?q=alpha,beta and then https://example.org/docs/path(testing).',
+	'Open file:///Users/example/report.txt or contact mailto:editor@example.org next.',
+	'Catalog urn:isbn:0451450523 and call tel:+12025550123 before loading data:text/plain,hello.',
+	'Fetch magnet:?xt=urn:btih:abcdef, launch foo+bar://example.service/path, and compare [https://example.com Example].',
+	'Reminder: check the corpus matrix, note:abc, chapter:one, longcustomscheme:alpha, abchttps://example.com, Visit https://',
+	'',
+].join('\n');
+
+const UNICODE_HEAVY_UNIT = [
+	'== Unicode ==',
+	'Cafe\u0301 nai\u0308ve Z\u0323a\u0301lgo alpha\u200Bbeta\u200Cgamma\u200Ddelta\u2060omega\uFEFFend',
+	'раураl Αlpha Сode οrn 👩🏽‍🚀👨‍👩‍👧‍👦🏳️‍🌈☕️',
+	'日本語かな交じり文漢字テスト مرحبابالعالمكيفالحال 𓀀𓁐𓂀𓃀𓆣',
+	'（＾ω＾）人（＾∀＾）ノ abc\u200Fمرحبا\u200Exyz [[Main Page|home]] {{Card|name=Unicode}}',
+	'',
+].join('\n');
+
+const SYNTHETIC_ARTICLE_UNIT = [
+	'{{Infobox settlement|name=Example City|population_total=123456|map={{Location map|World}}}}',
+	'== Lead ==',
+	"Example City is a ''fictional'' place with [[Main Page|notable links]], references, and templates.",
+	'== History ==',
+	'* Founded in 1901',
+	'* Expanded with {{Convert|25|km|mi}} of rail',
+	'== Geography ==',
+	'{| class="wikitable"',
+	'! District !! Population',
+	'|-',
+	'| North || 42000',
+	'|-',
+	'| South || 38000',
+	'|}',
+	'== Culture ==',
+	'<ref name="cite-1">A cited note with &amp; entity</ref>',
+	'<span class="lead">Inline tag</span> with __TOC__ and <br/> break.',
+	'',
+].join('\n');
+
+const OUTLINE_HEAVY_UNIT = [
+	'== Astronomy ==',
+	'* Observation',
+	'** Calibration',
+	'*** Drift notes',
+	'# Sequence one',
+	'## Nested ordinal note',
+	'; Instrument',
+	': Mirror-backed camera with long-form plain prose and careful terminology.',
+	'; Exposure',
+	': Repeated block structure should stay outline-heavy even when prose fills each item.',
+	'=== Archive ===',
+	'* Preservation log',
+	'* Range tracking notes',
+	'; Recovery policy',
+	': Keep structure stable and inline markup intentionally light.',
+	'',
+].join('\n');
+
 const SCENARIOS: readonly ScenarioDefinition[] = [
 	{
 		name: 'plain-paragraphs',
@@ -133,6 +244,55 @@ const SCENARIOS: readonly ScenarioDefinition[] = [
 		description: 'Repeated malformed markup that stresses recovery paths.',
 		build(size_bytes) {
 			return repeatToMinimumSize(`${PATHOLOGICAL_UNIT}\n`, size_bytes);
+		},
+	},
+	{
+		name: 'table-heavy',
+		description: 'Dense table markup with repeated rows, cells, refs, and attributes.',
+		build(size_bytes) {
+			return repeatToMinimumSize(`${TABLE_HEAVY_UNIT}\n`, size_bytes);
+		},
+	},
+	{
+		name: 'template-heavy',
+		description: 'Repeated nested templates and parser-like value formatting.',
+		build(size_bytes) {
+			return repeatToMinimumSize(`${TEMPLATE_HEAVY_UNIT}\n`, size_bytes);
+		},
+	},
+	{
+		name: 'inline-heavy',
+		description: 'Repeated inline markup with links, emphasis, refs, tags, and nowiki spans.',
+		build(size_bytes) {
+			return repeatToMinimumSize(`${INLINE_HEAVY_UNIT}\n`, size_bytes);
+		},
+	},
+	{
+		name: 'uri-heavy',
+		description: 'Dense URI acceptance and rejection cases embedded in surrounding prose.',
+		build(size_bytes) {
+			return repeatToMinimumSize(`${URI_HEAVY_UNIT}\n`, size_bytes);
+		},
+	},
+	{
+		name: 'unicode-heavy',
+		description: 'Unicode-heavy document text with combining marks, controls, emoji, RTL, and astral symbols.',
+		build(size_bytes) {
+			return repeatToMinimumSize(`${UNICODE_HEAVY_UNIT}\n`, size_bytes);
+		},
+	},
+	{
+		name: 'synthetic-article',
+		description: 'Larger article-shaped structure with repeated transitions across headings, prose, lists, tables, refs, tags, and templates.',
+		build(size_bytes) {
+			return repeatToMinimumSize(`${SYNTHETIC_ARTICLE_UNIT}\n`, size_bytes);
+		},
+	},
+	{
+		name: 'outline-heavy',
+		description: 'Heading, list, and definition-list structure with intentionally light inline markup.',
+		build(size_bytes) {
+			return repeatToMinimumSize(`${OUTLINE_HEAVY_UNIT}\n`, size_bytes);
 		},
 	},
 ] as const;
@@ -164,6 +324,15 @@ const STRESS_CASES: readonly StressCase[] = [
 	},
 ] as const;
 
+function findStressCases(profile: 'full' | 'streaming-only'): readonly StressCase[] {
+	switch (profile) {
+		case 'full':
+			return STRESS_CASES;
+		case 'streaming-only':
+			return [STRESS_CASES[0]!];
+	}
+}
+
 function getFlag(name: string): string | undefined {
 	return Deno.args.find((arg) => arg.startsWith(`--${name}=`))?.slice(name.length + 3);
 }
@@ -191,9 +360,52 @@ function parsePositiveIntFlag(name: string, fallback: number): number {
 	return value;
 }
 
-function repeatToMinimumSize(unit: string, minimum_size: number): string {
-	const repeat = Math.ceil(minimum_size / unit.length);
-	return unit.repeat(repeat).slice(0, minimum_size);
+class RepeatedTextSource implements TextSource {
+	readonly length: number;
+
+	constructor(
+		private readonly unit: string,
+		minimum_size: number,
+	) {
+		if (unit.length === 0) {
+			throw new Error('RepeatedTextSource requires a non-empty unit string');
+		}
+
+		this.length = minimum_size;
+	}
+
+	charCodeAt(index: number): number {
+		if (index < 0 || index >= this.length) {
+			return Number.NaN;
+		}
+
+		return this.unit.charCodeAt(index % this.unit.length);
+	}
+
+	slice(start: number, end: number): string {
+		return Array.from(this.iterSlices(start, end)).join('');
+	}
+
+	*iterSlices(start: number, end: number): Iterable<string> {
+		const safe_start = Math.max(0, Math.min(start, this.length));
+		const safe_end = Math.max(safe_start, Math.min(end, this.length));
+		let cursor = safe_start;
+
+		while (cursor < safe_end) {
+			const unit_offset = cursor % this.unit.length;
+			const take = Math.min(safe_end - cursor, this.unit.length - unit_offset);
+			yield this.unit.slice(unit_offset, unit_offset + take);
+			cursor += take;
+		}
+	}
+}
+
+function repeatToMinimumSize(unit: string, minimum_size: number): TextSource {
+	if (unit.length === 0) {
+		throw new Error('repeatToMinimumSize requires a non-empty unit string');
+	}
+
+	return new RepeatedTextSource(unit, minimum_size);
 }
 
 function mean(values: readonly number[]): number {
@@ -263,54 +475,86 @@ function findScenario(name: string): ScenarioDefinition {
 	return scenario;
 }
 
-function measureCase(case_def: StressCase, approach: ApproachModule, input: string, index: number): StressSample {
+function measureCase(case_def: StressCase, approach: ApproachModule, input: TextSource, index: number): StressSample {
 	const before = heapUsed();
 	const start = performance.now();
-	const checksum = case_def.run(approach, input);
-	const elapsed_ms = performance.now() - start;
-	const after = heapUsed();
 
-	return {
-		index,
-		elapsed_ms,
-		heap_delta_bytes: after - before,
-		checksum,
-	};
+	try {
+		const checksum = case_def.run(approach, input);
+		const elapsed_ms = performance.now() - start;
+		const after = heapUsed();
+
+		return {
+			index,
+			status: 'ok',
+			elapsed_ms,
+			heap_delta_bytes: after - before,
+			checksum,
+		};
+	} catch (error) {
+		const elapsed_ms = performance.now() - start;
+		const after = heapUsed();
+
+		return {
+			index,
+			status: 'failed',
+			elapsed_ms,
+			heap_delta_bytes: after - before,
+			checksum: null,
+			error_message: error instanceof Error
+				? `${error.name}: ${error.message}`
+				: String(error),
+		};
+	}
 }
 
 const approach_dir = requireFlag('approach-dir');
 const variant = getFlag('variant') ?? approach_dir.split('/').at(-1)!;
 const scenario_name = getFlag('scenario') ?? 'mixed-article';
+const profile = (getFlag('profile') ?? 'full') as 'full' | 'streaming-only';
 const repeats = parsePositiveIntFlag('repeats', 3);
 const size_mib = parsePositiveIntFlag('size-mib', 1024);
 const out_raw = getFlag('out');
-const out_path = out_raw === undefined ? undefined : join(REPO_ROOT, out_raw);
+const out_path = out_raw === undefined ? undefined : resolveOutputPath(out_raw);
 
 const scenario = findScenario(scenario_name);
+const stress_cases = findStressCases(profile);
 const size_bytes = size_mib * 1024 * 1024;
 const input = scenario.build(size_bytes);
 const approach = await loadApproachModule(approach_dir);
 
-const cases: StressCaseSummary[] = STRESS_CASES.map((case_def) => {
+const cases: StressCaseSummary[] = stress_cases.map((case_def) => {
 	const samples: StressSample[] = [];
+	const ok_samples: StressSample[] = [];
 
 	for (let index = 0; index < repeats; index++) {
-		samples.push(measureCase(case_def, approach, input, index));
+		const sample = measureCase(case_def, approach, input, index);
+		samples.push(sample);
+		if (sample.status === 'ok') {
+			ok_samples.push(sample);
+		}
 	}
 
 	return {
 		name: case_def.name,
 		samples,
-		elapsed_ms: summarizeSamples(samples.map((sample) => sample.elapsed_ms)),
-		heap_delta_bytes: summarizeSamples(samples.map((sample) => sample.heap_delta_bytes)),
+		ok_sample_count: ok_samples.length,
+		failed_sample_count: samples.length - ok_samples.length,
+		elapsed_ms: ok_samples.length > 0
+			? summarizeSamples(ok_samples.map((sample) => sample.elapsed_ms))
+			: null,
+		heap_delta_bytes: ok_samples.length > 0
+			? summarizeSamples(ok_samples.map((sample) => sample.heap_delta_bytes))
+			: null,
 	};
 });
 
 const report: StressReport = {
-	schema_version: 1,
+	schema_version: 2,
 	variant,
 	approach_dir,
 	generated_at: new Date().toISOString(),
+	profile,
 	scenario: scenario.name,
 	size_bytes,
 	size_mib,
@@ -323,6 +567,12 @@ const report: StressReport = {
 	notes: [
 		'Large-input stress runs are intentionally separate from the main acceptance ledger.',
 		'String sizes are generated on demand so the study can run MiB-scale and GiB-scale scenarios without checking giant fixtures into the repo.',
+		profile === 'streaming-only'
+			? 'This artifact uses the streaming-only stress profile to keep 1 GiB runs focused on event-path survivability instead of full tree materialization.'
+			: 'This artifact uses the full stress profile, including tree materialization and diagnostics.',
+		cases.some((case_summary) => case_summary.failed_sample_count > 0)
+			? 'One or more stress cases failed and were recorded in-place so the artifact still captures the scenario limit.'
+			: 'All requested stress cases completed successfully.',
 		`Scenario description: ${scenario.description}`,
 	],
 };
