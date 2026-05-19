@@ -1,0 +1,23 @@
+{
+  "study": "event-shape",
+  "variant": "lazy-position",
+  "experiment_dir": "experiments/event-shape-study/lazy-position",
+  "report_path": "experiments/event-shape-study/lazy-position/artifacts/report.json",
+  "comparison_json": "experiments/event-shape-study/lazy-position/artifacts/comparison.json",
+  "comparison_text": "experiments/event-shape-study/lazy-position/artifacts/comparison.txt",
+  "baseline_report": "experiments/event-shape-study/current-baseline/artifacts/report.json",
+  "generated_at": "2026-05-19T00:47:45.490Z",
+  "runs": 10,
+  "memory_repeats": 5,
+  "minimum_improvement": 0.05,
+  "maximum_regression": 0.03,
+  "bootstrap_iterations": 5000,
+  "alpha": 0.05,
+  "branch": "experiments",
+  "commit": "47ef0a13b5b1b6f53dc2b63aa5c2123bfe4dbc86",
+  "commands": [
+    "mise x deno@latest -- deno run --no-lock --allow-run=mise,git --allow-read --allow-write experiments/event-shape-study/tools/collect_approach_report.ts --approach-dir=lazy-position --variant=lazy-position --runs=10 --memory-repeats=5 --out=experiments/event-shape-study/lazy-position/artifacts/report.json",
+    "mise x deno@latest -- deno run --no-lock --allow-read experiments/event-shape-study/tools/compare_reports.ts --min-improvement=0.05 --max-regression=0.03 --bootstrap=5000 --alpha=0.05 --format=json experiments/event-shape-study/current-baseline/artifacts/report.json experiments/event-shape-study/lazy-position/artifacts/report.json",
+    "mise x deno@latest -- deno run --no-lock --allow-read experiments/event-shape-study/tools/compare_reports.ts --min-improvement=0.05 --max-regression=0.03 --bootstrap=5000 --alpha=0.05 --format=text experiments/event-shape-study/current-baseline/artifacts/report.json experiments/event-shape-study/lazy-position/artifacts/report.json"
+  ]
+}

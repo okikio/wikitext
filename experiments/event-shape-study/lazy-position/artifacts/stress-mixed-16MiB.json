@@ -1,0 +1,126 @@
+{
+  "schema_version": 2,
+  "variant": "lazy-position",
+  "approach_dir": "lazy-position",
+  "generated_at": "2026-05-19T00:48:26.803Z",
+  "profile": "full",
+  "scenario": "mixed-article",
+  "size_bytes": 16777216,
+  "size_mib": 16,
+  "repeats": 1,
+  "environment": {
+    "deno_version": "deno 2.7.14 / v8 14.7.173.20-rusty / typescript 5.9.2",
+    "platform": "aarch64-linux"
+  },
+  "cases": [
+    {
+      "name": "events() streamed count",
+      "samples": [
+        {
+          "index": 0,
+          "status": "ok",
+          "elapsed_ms": 5377.971752,
+          "heap_delta_bytes": -1700960,
+          "checksum": 4850290
+        }
+      ],
+      "ok_sample_count": 1,
+      "failed_sample_count": 0,
+      "elapsed_ms": {
+        "samples": [
+          5377.971752
+        ],
+        "mean": 5377.971752,
+        "median": 5377.971752,
+        "minimum": 5377.971752,
+        "maximum": 5377.971752,
+        "stdev": 0
+      },
+      "heap_delta_bytes": {
+        "samples": [
+          -1700960
+        ],
+        "mean": -1700960,
+        "median": -1700960,
+        "minimum": -1700960,
+        "maximum": -1700960,
+        "stdev": 0
+      }
+    },
+    {
+      "name": "parse() child count",
+      "samples": [
+        {
+          "index": 0,
+          "status": "ok",
+          "elapsed_ms": 16694.238966999998,
+          "heap_delta_bytes": 60328,
+          "checksum": 477078
+        }
+      ],
+      "ok_sample_count": 1,
+      "failed_sample_count": 0,
+      "elapsed_ms": {
+        "samples": [
+          16694.238966999998
+        ],
+        "mean": 16694.238966999998,
+        "median": 16694.238966999998,
+        "minimum": 16694.238966999998,
+        "maximum": 16694.238966999998,
+        "stdev": 0
+      },
+      "heap_delta_bytes": {
+        "samples": [
+          60328
+        ],
+        "mean": 60328,
+        "median": 60328,
+        "minimum": 60328,
+        "maximum": 60328,
+        "stdev": 0
+      }
+    },
+    {
+      "name": "parseWithDiagnostics() tree+diagnostics count",
+      "samples": [
+        {
+          "index": 0,
+          "status": "ok",
+          "elapsed_ms": 10609.558129000001,
+          "heap_delta_bytes": 99680,
+          "checksum": 477079
+        }
+      ],
+      "ok_sample_count": 1,
+      "failed_sample_count": 0,
+      "elapsed_ms": {
+        "samples": [
+          10609.558129000001
+        ],
+        "mean": 10609.558129000001,
+        "median": 10609.558129000001,
+        "minimum": 10609.558129000001,
+        "maximum": 10609.558129000001,
+        "stdev": 0
+      },
+      "heap_delta_bytes": {
+        "samples": [
+          99680
+        ],
+        "mean": 99680,
+        "median": 99680,
+        "minimum": 99680,
+        "maximum": 99680,
+        "stdev": 0
+      }
+    }
+  ],
+  "notes": [
+    "Large-input stress runs are intentionally separate from the main acceptance ledger.",
+    "String sizes are generated on demand so the study can run MiB-scale and GiB-scale scenarios without checking giant fixtures into the repo.",
+    "This artifact uses the full stress profile, including tree materialization and diagnostics.",
+    "All requested stress cases completed successfully.",
+    "Scenario description: A repeated mix of headings, links, templates, tables, and refs."
+  ]
+}

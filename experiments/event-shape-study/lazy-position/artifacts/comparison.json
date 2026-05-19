@@ -1,0 +1,62 @@
+{
+  "baseline": {
+    "variant": "current-baseline",
+    "branch": "perf-test-improve-event-shapes",
+    "commit": "ffe74312ed03a2b25f510ffa5786bcd4c65ba4a3",
+    "path": "experiments/event-shape-study/current-baseline/artifacts/report.json"
+  },
+  "minimum_improvement": 0.05,
+  "maximum_regression": 0.03,
+  "bootstrap_iterations": 5000,
+  "alpha": 0.05,
+  "decisions": [
+    {
+      "variant": "lazy-position",
+      "path": "experiments/event-shape-study/lazy-position/artifacts/report.json",
+      "target_timing_median": -1.1262302459513576,
+      "memory_median": -1.8518927147822155,
+      "worst_critical_timing": -1.249626307922272,
+      "significant_target_wins": 0,
+      "significant_memory_wins": 0,
+      "significant_critical_regressions": 9,
+      "recommended": false,
+      "top_timing_wins": [],
+      "top_memory_wins": [],
+      "critical_regressions": [
+        {
+          "name": "parse(): synthetic article (~35-45 KB)",
+          "family": "timing",
+          "estimate": -1.249626307922272,
+          "ci_lower": -2.1052875911239286,
+          "ci_upper": -1.1156960988254296,
+          "p_value": 0,
+          "adjusted_p_value": 0,
+          "significant_better": false,
+          "significant_worse": true
+        },
+        {
+          "name": "session.parse() warm: same-size mixed (~8 KB)",
+          "family": "timing",
+          "estimate": -1.19461429788519,
+          "ci_lower": -2.2883137656283066,
+          "ci_upper": -1.105441054976658,
+          "p_value": 0,
+          "adjusted_p_value": 0,
+          "significant_better": false,
+          "significant_worse": true
+        },
+        {
+          "name": "parse(): same-size mixed (~8 KB)",
+          "family": "timing",
+          "estimate": -1.1673551098292037,
+          "ci_lower": -1.7253257461590932,
+          "ci_upper": -1.0555289981041531,
+          "p_value": 0,
+          "adjusted_p_value": 0,
+          "significant_better": false,
+          "significant_worse": true
+        }
+      ]
+    }
+  ]
+}

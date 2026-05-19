@@ -1,0 +1,12 @@
+baseline: current-baseline (perf-test-improve-event-shapes ffe74312)
+decision rule: target median >= +5.00%, critical regressions > -3.00% disallowed, Holm-adjusted alpha=0.050
+
+lazy-position: not recommended
+report: experiments/event-shape-study/lazy-position/artifacts/report.json
+target timing median: -112.62% (0/9 significant wins)
+memory median: -185.19% (0 significant wins)
+worst critical timing: -124.96% (9 significant regressions)
+critical timing risks:
+- parse(): synthetic article (~35-45 KB): -124.96% [-210.53%, -111.57%], p_adj=0.00e+0
+- session.parse() warm: same-size mixed (~8 KB): -119.46% [-228.83%, -110.54%], p_adj=0.00e+0
+- parse(): same-size mixed (~8 KB): -116.74% [-172.53%, -105.55%], p_adj=0.00e+0
