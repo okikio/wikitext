@@ -104,8 +104,8 @@ budget or the acceptance gate.
 
 The checked-in archive currently keeps one cheaper large-input smoke artifact per approach at
 `16 MiB` under `artifacts/stress-mixed-16MiB.json`. That proves the archive path end to end.
-The broader scenario matrix is now driven by tooling rather than being implied by the current
-checked-in artifact count.
+The broader one-shot scenario matrix is now driven by tooling rather than being implied by the
+current checked-in artifact count.
 
 Use the batch runner when you want to fill a one-shot scenario matrix instead of one-off files:
 
@@ -180,175 +180,16 @@ The one-shot stress collector records per-case failures inside the JSON artifact
 the whole file when one runtime exception hits a pathological input. That matters because a recorded
 failure tells us more than a missing artifact would.
 
-## Large-input session stress runs
-
-One-shot large-input stress answers whether an approach survives large text and how much whole-run
-work it does. Session stress answers a different question: whether the same event shape helps when
-callers keep a session alive and ask for outline, events, parse, and diagnostics results more than
-once.
-
-The session collector mirrors the case semantics in `session_bench.ts` for the first study-local
-workload set:
-
-- `session.outline() cold`
-- `session.outline() warm`
-- `session.events() cold`
-- `session.events() warm`
-- `session.parse() cold`
-- `session.parse() warm`
-- `session.parseWithDiagnostics() cold`
-- `session.parseWithDiagnostics() warm`
-- `consumer workflow: session outline -> events -> parse cold`
-- `consumer workflow: session outline -> events -> parse warm`
-
-The session lane now uses the same ten scenario families as the one-shot matrix.
-That keeps `16 MiB` and `1 GiB` session coverage aligned with the broader large-input archive,
-even though the checked-in session artifacts are still much sparser than the implemented surface.
-
-Collect one session-stress artifact for one approach:
-
-```bash
-mise x deno@latest -- deno run --no-lock --allow-read --allow-write --allow-sys \
-  --v8-flags=--expose-gc \
-  experiments/event-shape-study/tools/collect_large_input_session_stress_report.ts \
-  --approach-dir=current-baseline \
-  --variant=current-baseline \
-  --scenario=mixed-article \
-  --size-mib=16 \
-  --repeats=1 \
-  --out=experiments/event-shape-study/current-baseline/artifacts/session-stress-mixed-16MiB.json
-```
-
-Use the session batch runner when you want the same session scenario set across several approaches:
-
-```bash
-mise x deno@latest -- deno run --no-lock --allow-read --allow-write --allow-run --allow-sys \
-  experiments/event-shape-study/tools/run_large_input_session_stress_matrix.ts \
-  --approaches=current-baseline,shared-props \
-  --scenarios=plain-paragraphs,mixed-article,pathological-recovery,table-heavy,template-heavy,inline-heavy,uri-heavy,unicode-heavy,synthetic-article,outline-heavy \
-  --sizes-mib=16 \
-  --repeats=1
-```
-
-The session matrix runner now gives child collectors a larger V8 heap budget by default with
-`--max-old-space-size-mib=8192`. Override that flag if you need a different ceiling for a
-particular machine or scenario lane.
-
-The first full `16 MiB` matrix attempt on this branch exposed a practical budget issue:
-`current-baseline` on `pathological-recovery` kept one CPU core busy for more than eleven
-minutes before the run was stopped. Treat that scenario as a separately budgeted lane rather
-than assuming it belongs in the same quick follow-up batch as `mixed-article` and `synthetic-article`.
-
-The current checked-in session archive covers only the first non-pathological `16 MiB` slice for all four
-approaches:
-
-- `mixed-article`
-- `synthetic-article`
-
-`pathological-recovery` remains intentionally incomplete on this branch until it is rerun with a
-separate time budget.
-
-Warm session cases intentionally include the cache-priming step before the measured second access.
-That matches the benchmark helper semantics in `session_bench.ts`, so the checked-in study artifacts
-and the benchmark file describe the same workload shape.
-
-## Budgeted large-input mitata runs
-
-The one-shot stress collector is useful for survivability and scale diagnostics, but it does not use
-mitata. For the `1 GiB` tier, the study now also has a budgeted mitata lane for streaming parser work.
-Its purpose is narrower than the standard event-shape benchmark suite:
-
-- keep the command under about two minutes on the study machine
-- stress real parser traversal on a `1 GiB` input
-- stay on streaming parser paths instead of requiring full tree materialization
-
-The current mitata large-input collector measures two streaming cases:
-
-- `outlineEvents() streamed count`
-- `events() streamed count`
-
-The collector now lowers mitata's minimum sample count to `1` by default for this lane and records
-the checksum from the first measured execution instead of doing a separate full pre-pass. That keeps
-the `1 GiB` collector much closer to its intended command budget on expensive scenarios.
-
-The mitata lane now uses the same ten scenario families as the one-shot and session lanes. The
-implementation surface is no longer narrower than the rest of the study, and the checked-in `1 GiB`
-archive now covers every non-pathological scenario across all four approaches.
-
-For limit-study sweeps, the matrix runner also supports `--continue-on-error` so one failing size or
-approach does not hide the rest of the boundary. That mode still exits non-zero at the end, but it
-keeps going and prints a structured failure summary for every failed job.
-
-Even with those mitigations, `pathological-recovery` at `1 GiB` currently exceeds the practical
-survivability budget for `current-baseline` on this machine: the direct collector run was hard-killed
-before it could write an artifact. Treat that scenario as a separate limit study rather than assuming
-it belongs in the same normal archive pass as `plain-paragraphs`, `mixed-article`, and `synthetic-article`.
-
-The follow-up limit-study sweeps showed that the failure is not just a `1 GiB` budget miss.
-On this branch and machine:
-
-- `256 MiB` baseline `pathological-recovery` overran a nominal `60s` budget for more than thirty minutes before it was stopped
-- `64 MiB` baseline `pathological-recovery` failed with `RangeError: Maximum call stack size exceeded`
-- a cross-approach `1/2/4 MiB` limit-study sweep failed for all four approaches with the same stack-overflow shape
-
-That makes `pathological-recovery` an explicit parser-limit lane, not merely an unfinished archive row.
-
-The current checked-in `1 GiB` mitata archive covers the non-pathological lane for all four approaches:
-
-- `plain-paragraphs`
-- `mixed-article`
-- `table-heavy`
-- `template-heavy`
-- `inline-heavy`
-- `uri-heavy`
-- `unicode-heavy`
-- `synthetic-article`
-- `outline-heavy`
-
-Collect one `1 GiB` mitata stress artifact for one approach:
-
-```bash
-mise x deno@latest -- deno run --no-lock --allow-read --allow-write --allow-sys --allow-env=NODE_DISABLE_COLORS \
-  --v8-flags=--expose-gc,--max-old-space-size=8192 \
-  experiments/event-shape-study/tools/collect_large_input_mitata_report.ts \
-  --approach-dir=current-baseline \
-  --variant=current-baseline \
-  --scenario=mixed-article \
-  --size-mib=1024 \
-  --total-budget-seconds=110 \
-  --out=experiments/event-shape-study/current-baseline/artifacts/mitata-stress-mixed-1GiB.json
-```
-
-Use the matrix runner when you want the same `1 GiB` mitata stress lane across several approaches:
-
-```bash
-mise x deno@latest -- deno run --no-lock --allow-read --allow-write --allow-run --allow-sys --allow-env=NODE_DISABLE_COLORS \
-  experiments/event-shape-study/tools/run_large_input_mitata_matrix.ts \
-  --approaches=current-baseline,shared-props \
-  --scenarios=plain-paragraphs,mixed-article,pathological-recovery,table-heavy,template-heavy,inline-heavy,uri-heavy,unicode-heavy,synthetic-article,outline-heavy \
-  --sizes-mib=1024 \
-  --total-budget-seconds=110
-```
-
-The matrix runner shells out through `mise`, so it needs `--allow-run`. The single-run collector does not.
-
-When you need a quick inventory before choosing the next batch, summarize the archive directly:
-
-```bash
-mise x deno@latest -- deno run --no-lock --allow-read \
-  experiments/event-shape-study/tools/summarize_large_input_archive.ts \
-  --size-mib=1024
-```
-
-That summary groups one-shot stress, session stress, and mitata stress coverage by approach so the
-next run can target missing scenarios instead of rescanning artifact directories by hand.
-
 If you want to verify the study is fully built before collecting anything new, run the preflight inventory:
 
 ```bash
 mise x deno@latest -- deno run --no-lock --allow-read \
   experiments/event-shape-study/tools/validate_experiment_matrix.ts
 ```
+
+This preflight only checks the runnable surface that exists on this branch: the core study docs,
+the standard comparison tools, the one-shot large-input tools, the approach-local `code/mod.ts`
+snapshots, and the checked-in `16 MiB` mixed-article smoke artifacts.
 
 ## Decision rule
 

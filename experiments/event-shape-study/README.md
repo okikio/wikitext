@@ -11,14 +11,15 @@ Current status:
 
 - `current-baseline` is the control condition and now has its own approach-local code snapshot.
 - `shared-props` improves retained memory, but it does not clear the timing bar.
+- `lazy-position` isolates lazy `position` materialization and regresses timing even more decisively than the baseline study bar allows.
 - `lazy-position-shared-props` regresses timing badly and is rejected.
 - `planned-flat-eager-event-shape` has now been tested and rejected.
 
 Every approach directory now also carries an approach-local `code/` snapshot and a checked-in
-`artifacts/stress-mixed-16MiB.json` file for comparable large-input smoke coverage. The branch now
-also has the full drafted experiment toolchain again: one-shot large-input stress, session-oriented
-large-input stress, a budgeted `1 GiB` mitata lane, and a preflight inventory that confirms the
-study surface is complete before new collection starts.
+`artifacts/stress-mixed-16MiB.json` file for comparable large-input smoke coverage. This branch's
+documented toolchain now covers the standard comparison flow, the deterministic round-robin check,
+the one-shot large-input stress lane, and a preflight inventory that confirms those study surfaces
+exist before new collection starts.
 
 The newest artifact paths both reject the candidate:
 
@@ -30,10 +31,9 @@ important point: this candidate still does not clear the `+5%` acceptance bar an
 regresses retained memory overall.
 
 Important scope note: the current checked-in comparisons are statistically grounded for the
-standard study sizes, not for `1 GiB`-class stress inputs. Large-input work now has three separate
-study-local collection lanes documented in [methods.md](methods.md): one-shot stress artifacts,
-session-oriented stress artifacts, and a budgeted `1 GiB` mitata lane. The current branch only keeps
-the lighter `16 MiB` mixed-article smoke artifact per approach checked in so far.
+standard study sizes, not for `1 GiB`-class stress inputs. The current branch documents and ships
+only the one-shot large-input stress lane from the broader draft. It still keeps just the lighter
+`16 MiB` mixed-article smoke artifact per approach checked in by default.
 
 The study uses this decision rule:
 
